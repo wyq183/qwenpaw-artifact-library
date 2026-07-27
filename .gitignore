@@ -1,0 +1,5 @@
+# Runtime library data belongs to the installed plugin, not source control.
+data/
+__pycache__/
+backend/__pycache__/
+_upstream/
