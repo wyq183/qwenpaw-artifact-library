@@ -6,7 +6,7 @@
   var Button = antd.Button, Input = antd.Input, Select = antd.Select, Tag = antd.Tag,
     Table = antd.Table, Empty = antd.Empty, Modal = antd.Modal, Drawer = antd.Drawer,
     Descriptions = antd.Descriptions, Space = antd.Space, Tooltip = antd.Tooltip,
-    message = antd.message, Spin = antd.Spin;
+    message = antd.message, Spin = antd.Spin, Dropdown = antd.Dropdown;
   var pluginId = "qwenpaw-artifact-library";
   var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
   var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
@@ -31,6 +31,42 @@
   function StatusTag(props) { return h(Tag, { color: STATUS_COLOR[props.status] }, STATUS[props.status] || props.status); }
   function TypeTag(props) { return h(Tag, { color: TYPE_COLOR[props.type] }, fileIcon(props.type) + " " + (TYPES[props.type] || props.type)); }
 
+  function StatsModal(p) {
+    var sd = React.useState(null), statsData = sd[0], setStatsData = sd[1];
+    React.useEffect(function() {
+      if (!p.open) return;
+      request("/stats").then(function(d) { setStatsData(d); }).catch(function(e) { message.error(e.message); });
+    }, [p.open]);
+    return h(Modal, { title: "产物统计", open: p.open, onCancel: p.close, footer: null, width: 500 },
+      statsData ? h("div", { style: { padding: "8px 0" } },
+        h("div", { style: { fontSize: 20, fontWeight: 700, textAlign: "center", marginBottom: 18 } }, statsData.total + " 项总产物"),
+        h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 } },
+          h("div", null,
+            h("div", { style: { fontWeight: 600, marginBottom: 8 } }, "按项目"),
+            Object.keys(statsData.by_project || {}).map(function(k) {
+              return h("div", { key: k, style: { display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 } },
+                h("span", null, k), h("span", { style: { fontWeight: 600 } }, statsData.by_project[k]));
+            })
+          ),
+          h("div", null,
+            h("div", { style: { fontWeight: 600, marginBottom: 8 } }, "按类型"),
+            Object.keys(statsData.by_type || {}).map(function(k) {
+              return h("div", { key: k, style: { display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 } },
+                h("span", null, TYPES[k] || k), h("span", { style: { fontWeight: 600 } }, statsData.by_type[k]));
+            })
+          )
+        ),
+        h("div", { style: { marginTop: 14 } },
+          h("div", { style: { fontWeight: 600, marginBottom: 8 } }, "按状态"),
+          Object.keys(statsData.by_status || {}).map(function(k) {
+            return h("div", { key: k, style: { display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 13 } },
+              h("span", null, STATUS[k] || k), h("span", { style: { fontWeight: 600 } }, statsData.by_status[k]));
+          })
+        )
+      ) : h("div", { style: { padding: 40, textAlign: "center" } }, h(Spin, null))
+    );
+  }
+
   function ArtifactLibrary() {
     var dataState = React.useState([]), items = dataState[0], setItems = dataState[1];
     var busyState = React.useState(true), busy = busyState[0], setBusy = busyState[1];
@@ -40,6 +76,10 @@
     var projectState = React.useState(""), project = projectState[0], setProject = projectState[1];
     var selectedState = React.useState(null), selected = selectedState[0], setSelected = selectedState[1];
     var trashState = React.useState(false), includeTrash = trashState[0], setIncludeTrash = trashState[1];
+    var statsOpenState = React.useState(false), statsOpen = statsOpenState[0], setStatsOpen = statsOpenState[1];
+    var selKeysState = React.useState([]), selectedRowKeys = selKeysState[0], setSelectedRowKeys = selKeysState[1];
+    var notesEditState = React.useState(false), notesEditing = notesEditState[0], setNotesEditing = notesEditState[1];
+    var notesValState = React.useState(""), notesVal = notesValState[0], setNotesVal = notesValState[1];
 
     var load = React.useCallback(function () {
       setBusy(true);
@@ -51,6 +91,12 @@
     var softRefresh = function(){ setSelected(null); load(); };
     var trash = function(item) { Modal.confirm({ title:"移入回收站？", content:"将把「"+item.title+"」的原文件移入 Windows 回收站。它不会被永久删除，可从系统回收站恢复。", okText:"移入回收站", okButtonProps:{danger:true}, cancelText:"取消", onOk:function(){return request("/artifacts/"+item.id+"/trash",{method:"POST"}).then(function(){message.success("已移入回收站");softRefresh();});} }); };
     var markFinal = function(item) { return request("/artifacts/"+item.id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"final"})}).then(function(d){message.success(d.demoted_final_ids && d.demoted_final_ids.length ? "已设为最终版，旧最终版已归档" : "已设为最终版");softRefresh();}); };
+    var loadStats = function(){ setStatsOpen(true); };
+    var downloadExport = function(fmt){ Q.host.fetch("/artifact-library/export?format="+fmt).then(function(r){if(!r.ok)throw new Error("导出失败");return r.blob();}).then(function(blob){var url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="artifacts."+(fmt==="markdown"?"md":fmt);document.body.appendChild(a);a.click();setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},200);}).catch(function(e){message.error(e.message);}); };
+    var doBatchUpdate = function(field){ Modal.confirm({title:"批量修改"+field,content:"输入新的"+(field==="project"?"项目名":"类型"),okText:"确定",cancelText:"取消",onOk:function(){return new Promise(function(resolve){var val=prompt("新的"+(field==="project"?"项目名":"类型"));if(!val){resolve();return;}var payload={items:selectedRowKeys.map(function(id){var o={id:id};o[field]=val;return o;})};request("/batch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(d){message.success("已更新 "+d.updated+" 项");setSelectedRowKeys([]);softRefresh();}).catch(function(e){message.error(e.message);}).finally(resolve);});}}); };
+    var doBatchDelete = function(){ Modal.confirm({title:"批量移入回收站",content:"确定将选中的 "+selectedRowKeys.length+" 项移入回收站？不会永久删除。",okText:"移入回收站",okButtonProps:{danger:true},cancelText:"取消",onOk:function(){return request("/batch/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids:selectedRowKeys})}).then(function(d){message.success("已移入回收站 "+d.deleted+" 项");setSelectedRowKeys([]);softRefresh();}).catch(function(e){message.error(e.message);});}}); };
+    var saveNotes = function(){ if(!selected)return; request("/artifacts/"+selected.id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({notes:notesVal})}).then(function(){message.success("备注已保存");setNotesEditing(false);selected.notes=notesVal;setSelected(Object.assign({},selected));}).catch(function(e){message.error(e.message);}); };
+    var rowSelection = { selectedRowKeys: selectedRowKeys, onChange: function(keys){ setSelectedRowKeys(keys); } };
     var columns = [
       { title:"产物", dataIndex:"title", key:"title", width:300, render:function(_,x){return h("div",{style:{display:"flex",gap:10,alignItems:"center"}},h("span",{style:{fontFamily:"ui-monospace,Consolas",fontSize:16,color:"#1677ff",width:22,textAlign:"center"}},fileIcon(x.artifact_type)),h("div",null,h("div",{style:{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}},x.title),h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}},x.summary)));}},
       { title:"归属", key:"scope", width:210, render:function(_,x){return h("div",null,h("div",{style:{fontSize:13}},x.project),h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:3}},x.deliverable));}},
@@ -68,14 +114,16 @@
             h(Select,{allowClear:true,value:project||undefined,onChange:function(v){setProject(v||"");},placeholder:"全部项目",options:projects.map(function(x){return {label:x,value:x};}),style:{width:170}}),
             h(Select,{allowClear:true,value:type||undefined,onChange:function(v){setType(v||"");},placeholder:"全部类型",options:Object.keys(TYPES).map(function(x){return {label:TYPES[x],value:x};}),style:{width:130}}),
             h(Select,{allowClear:true,value:status||undefined,onChange:function(v){setStatus(v||"");},placeholder:"全部状态",options:Object.keys(STATUS).map(function(x){return {label:STATUS[x],value:x};}),style:{width:130}}),
-            h("span",{style:{flex:1}}),h(Button,{type:includeTrash?"primary":"default",onClick:function(){setIncludeTrash(!includeTrash);}},includeTrash?"显示全部记录":"含回收站记录"),h(Button,{onClick:load},"刷新")
+            h("span",{style:{flex:1}}),h(Button,{type:includeTrash?"primary":"default",onClick:function(){setIncludeTrash(!includeTrash);}},includeTrash?"显示全部记录":"含回收站记录"),h(Button,{onClick:load},"刷新"),h(Button,{onClick:loadStats},"统计"),h(Dropdown,{menu:{items:[{key:"json",label:"导出为 JSON",onClick:function(){downloadExport("json");}},{key:"csv",label:"导出为 CSV",onClick:function(){downloadExport("csv");}},{key:"md",label:"导出为 Markdown",onClick:function(){downloadExport("markdown");}}]}},h(Button,null,"导出 ▾"))
           ),
-          busy?h("div",{style:{padding:70,textAlign:"center"}},h(Spin,null)):items.length?h(Table,{dataSource:items,rowKey:"id",columns:columns,pagination:{pageSize:12,showSizeChanger:false},size:"middle",onRow:function(x){return {onDoubleClick:function(){setSelected(x);},style:{cursor:"pointer"}};}}):h(Empty,{description:"还没有登记的正式产物。Agent 交付文件后调用 register_artifact 即可收录。",image:Empty.PRESENTED_IMAGE_SIMPLE})
+          selectedRowKeys.length>0?h("div",{style:{display:"flex",gap:8,alignItems:"center",marginBottom:12,padding:"6px 12px",background:"#e6f4ff",borderRadius:6}},h("span",{style:{fontSize:13,color:"#1677ff"}},"已选择 "+selectedRowKeys.length+" 项"),h(Button,{size:"small",onClick:function(){doBatchUpdate("project");}},"修改项目"),h(Button,{size:"small",onClick:function(){doBatchUpdate("artifact_type");}},"修改类型"),h(Button,{size:"small",danger:true,onClick:doBatchDelete},"批量删除"),h(Button,{size:"small",onClick:function(){setSelectedRowKeys([]);}},"取消选择")):null,
+          busy?h("div",{style:{padding:70,textAlign:"center"}},h(Spin,null)):items.length?h(Table,{rowSelection:rowSelection,dataSource:items,rowKey:"id",columns:columns,pagination:{pageSize:12,showSizeChanger:false},size:"middle",onRow:function(x){return {onDoubleClick:function(){setSelected(x);},style:{cursor:"pointer"}};}}):h(Empty,{description:"还没有登记的正式产物。Agent 交付文件后调用 register_artifact 即可收录。",image:Empty.PRESENTED_IMAGE_SIMPLE})
         ),
+        h(StatsModal,{open:statsOpen,close:function(){setStatsOpen(false);}}),
         h(Drawer,{title:selected?selected.title:"产物详情",open:!!selected,onClose:function(){setSelected(null);},width:560,extra:selected?h(Space,null,h(Button,{onClick:function(){runShell("file",selected.path);}},"复制路径"),selected.status!=="trashed"?h(Button,{danger:true,onClick:function(){trash(selected);}},"移入回收站"):null):null},selected?h("div",null,
           h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:20}},h("span",{style:{fontSize:28,color:"#1677ff"}},fileIcon(selected.artifact_type)),h("div",null,h("div",{style:{fontWeight:700,fontSize:16}},selected.title),h("div",{style:{marginTop:6}},h(TypeTag,{type:selected.artifact_type})," ",h(StatusTag,{status:selected.status})))),
           selected.status==="final"?h("div",{style:{margin:"0 0 20px",padding:"10px 12px",background:"#f6ffed",border:"1px solid #b7eb8f",borderRadius:8,fontSize:13,color:"#389e0d"}},"这是当前交付项的最终版。登记新最终版时，本记录会自动归档。 "):null,
-          h(Descriptions,{column:1,size:"small",bordered:true},h(Descriptions.Item,{label:"说明"},selected.summary),h(Descriptions.Item,{label:"项目"},selected.project),h(Descriptions.Item,{label:"交付项"},selected.deliverable),h(Descriptions.Item,{label:"标签"},(selected.tags||[]).length?selected.tags.map(function(t){return h(Tag,{key:t},t);}):"—"),h(Descriptions.Item,{label:"文件"},h("div",null,h("div",{style:{wordBreak:"break-all"}},basename(selected.path)),h("div",{style:{fontSize:12,color:"#8c8c8c",wordBreak:"break-all",marginTop:4}},selected.path))),h(Descriptions.Item,{label:"文件信息"},fmtSize(selected.size_bytes)+" · "+(selected.extension||"无后缀")+" · "+(selected.file_exists?"文件存在":"原文件未找到")),h(Descriptions.Item,{label:"来源"},(selected.agent_id||"未知 Agent")+(selected.session_id?" · "+selected.session_id:"")),h(Descriptions.Item,{label:"登记于"},fmtTime(selected.created_at)))
+          h(Descriptions,{column:1,size:"small",bordered:true},h(Descriptions.Item,{label:"说明"},selected.summary),h(Descriptions.Item,{label:"项目"},selected.project),h(Descriptions.Item,{label:"交付项"},selected.deliverable),h(Descriptions.Item,{label:"标签"},(selected.tags||[]).length?selected.tags.map(function(t){return h(Tag,{key:t},t);}):"—"),h(Descriptions.Item,{label:"文件"},h("div",null,h("div",{style:{wordBreak:"break-all"}},basename(selected.path)),h("div",{style:{fontSize:12,color:"#8c8c8c",wordBreak:"break-all",marginTop:4}},selected.path))),h(Descriptions.Item,{label:"文件信息"},fmtSize(selected.size_bytes)+" · "+(selected.extension||"无后缀")+" · "+(selected.file_exists?"文件存在":"原文件未找到")),h(Descriptions.Item,{label:"来源"},(selected.agent_id||"未知 Agent")+(selected.session_id?" · "+selected.session_id:"")),h(Descriptions.Item,{label:"备注"},notesEditing?h("div",{style:{display:"flex",gap:8,flexDirection:"column"}},h(Input.TextArea,{value:notesVal,onChange:function(e){setNotesVal(e.target.value);},rows:2,placeholder:"添加备注"}),h("div",{style:{display:"flex",gap:8}},h(Button,{size:"small",type:"primary",onClick:saveNotes},"保存"),h(Button,{size:"small",onClick:function(){setNotesEditing(false);}},"取消"))):h("div",{style:{display:"flex",gap:8,alignItems:"center"}},h("span",{style:{color:selected.notes?"inherit":"#bfbfbf"}},selected.notes||"暂无备注"),h(Button,{type:"link",size:"small",onClick:function(){setNotesVal(selected.notes||"");setNotesEditing(true);}},"编辑"))),h(Descriptions.Item,{label:"登记于"},fmtTime(selected.created_at)))
         ):null)
       )
     );

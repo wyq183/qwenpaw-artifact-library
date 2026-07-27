@@ -1,5 +1,10 @@
-# Runtime library data belongs to the installed plugin, not source control.
-data/
+*.zip
+*.pyc
 __pycache__/
-backend/__pycache__/
-_upstream/
+node_modules/
+package/
+*.egg-info/
+dist/
+build/
+.DS_Store
+thumbs.db

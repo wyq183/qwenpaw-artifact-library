@@ -1,9 +1,9 @@
 {
   "id": "qwenpaw-artifact-library",
   "name": "产物库",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "general",
-  "description": "登记、追溯和安全管理各 Agent 的正式产物。",
+  "description": "正式产物的登记、预览、安全管理与快捷分享。",
   "author": "YiQi",
   "entry": {
     "backend": "backend/plugin.py",
