@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+# Plugin loaders may execute the entry from a different working directory.
+# Import sibling modules by absolute path instead of relying on cwd.
 if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
 
