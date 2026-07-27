@@ -1,0 +1,87 @@
+/* QwenPaw Artifact Library — runtime frontend plugin. */
+(function () {
+  var Q = window.QwenPaw;
+  if (!Q || !Q.host) return console.error("[artifact-library] Host SDK unavailable");
+  var React = Q.host.React, antd = Q.host.antd, I = Q.host.antdIcons, h = React.createElement;
+  var Button = antd.Button, Input = antd.Input, Select = antd.Select, Tag = antd.Tag,
+    Table = antd.Table, Empty = antd.Empty, Modal = antd.Modal, Drawer = antd.Drawer,
+    Descriptions = antd.Descriptions, Space = antd.Space, Tooltip = antd.Tooltip,
+    message = antd.message, Spin = antd.Spin;
+  var pluginId = "qwenpaw-artifact-library";
+  var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
+  var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
+  var TYPE_COLOR = { image:"magenta", document:"blue", web:"cyan", code:"purple", video:"volcano", audio:"gold", archive:"orange", data:"geekblue", other:"default" };
+  var STATUS_COLOR = { draft:"default", delivered:"blue", final:"green", archived:"gold", trashed:"red" };
+
+  function request(path, opts) {
+    return Q.host.fetch("/artifact-library" + path, opts).then(function (r) {
+      return r.json().then(function (body) { if (!r.ok) throw new Error(body.detail || "请求失败"); return body; });
+    });
+  }
+  function fmtTime(v) { return v ? new Date(v * 1000).toLocaleString("zh-CN", { hour12:false }) : "—"; }
+  function fmtSize(v) { if (v === undefined || v === null) return "—"; var u=["B","KB","MB","GB"], i=0; while(v>=1024 && i<3){v/=1024;i++;} return (i ? v.toFixed(v>=10?1:2) : v) + " " + u[i]; }
+  function basename(path) { return (path || "").split(/[\\/]/).pop(); }
+  function fileIcon(type) { return { image:"▧", document:"▤", web:"◫", code:"</>", video:"▷", audio:"♪", archive:"▥", data:"▦", other:"□" }[type] || "□"; }
+  function runShell(kind, path) {
+    /* Host has no shell API; leave system actions explicit rather than unsafe browser tricks. */
+    navigator.clipboard && navigator.clipboard.writeText(path);
+    if (message) message.info(kind === "folder" ? "路径已复制。可在资源管理器地址栏粘贴打开。" : "文件路径已复制。");
+  }
+
+  function StatusTag(props) { return h(Tag, { color: STATUS_COLOR[props.status] }, STATUS[props.status] || props.status); }
+  function TypeTag(props) { return h(Tag, { color: TYPE_COLOR[props.type] }, fileIcon(props.type) + " " + (TYPES[props.type] || props.type)); }
+
+  function ArtifactLibrary() {
+    var dataState = React.useState([]), items = dataState[0], setItems = dataState[1];
+    var busyState = React.useState(true), busy = busyState[0], setBusy = busyState[1];
+    var queryState = React.useState(""), query = queryState[0], setQuery = queryState[1];
+    var typeState = React.useState(""), type = typeState[0], setType = typeState[1];
+    var statusState = React.useState(""), status = statusState[0], setStatus = statusState[1];
+    var projectState = React.useState(""), project = projectState[0], setProject = projectState[1];
+    var selectedState = React.useState(null), selected = selectedState[0], setSelected = selectedState[1];
+    var trashState = React.useState(false), includeTrash = trashState[0], setIncludeTrash = trashState[1];
+
+    var load = React.useCallback(function () {
+      setBusy(true);
+      var p = new URLSearchParams(); if(query)p.set("query",query); if(type)p.set("artifact_type",type); if(status)p.set("status",status); if(project)p.set("project",project); if(includeTrash)p.set("include_trashed","true");
+      request("/artifacts?" + p.toString()).then(function (d) { setItems(d.items || []); }).catch(function(e){ message && message.error(e.message); }).finally(function(){setBusy(false);});
+    }, [query,type,status,project,includeTrash]);
+    React.useEffect(function(){ var id=setTimeout(load,180); return function(){clearTimeout(id);}; },[load]);
+    var projects = Array.from(new Set(items.map(function(x){return x.project;}).filter(Boolean))).sort();
+    var softRefresh = function(){ setSelected(null); load(); };
+    var trash = function(item) { Modal.confirm({ title:"移入回收站？", content:"将把「"+item.title+"」的原文件移入 Windows 回收站。它不会被永久删除，可从系统回收站恢复。", okText:"移入回收站", okButtonProps:{danger:true}, cancelText:"取消", onOk:function(){return request("/artifacts/"+item.id+"/trash",{method:"POST"}).then(function(){message.success("已移入回收站");softRefresh();});} }); };
+    var markFinal = function(item) { return request("/artifacts/"+item.id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"final"})}).then(function(d){message.success(d.demoted_final_ids && d.demoted_final_ids.length ? "已设为最终版，旧最终版已归档" : "已设为最终版");softRefresh();}); };
+    var columns = [
+      { title:"产物", dataIndex:"title", key:"title", width:300, render:function(_,x){return h("div",{style:{display:"flex",gap:10,alignItems:"center"}},h("span",{style:{fontFamily:"ui-monospace,Consolas",fontSize:16,color:"#1677ff",width:22,textAlign:"center"}},fileIcon(x.artifact_type)),h("div",null,h("div",{style:{fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}},x.title),h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:240}},x.summary)));}},
+      { title:"归属", key:"scope", width:210, render:function(_,x){return h("div",null,h("div",{style:{fontSize:13}},x.project),h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:3}},x.deliverable));}},
+      { title:"类型", dataIndex:"artifact_type", width:105, render:function(v){return h(TypeTag,{type:v});}},
+      { title:"状态", dataIndex:"status", width:115, render:function(v){return h(StatusTag,{status:v});}},
+      { title:"登记时间", dataIndex:"created_at", width:170, render:function(v){return h("span",{style:{fontSize:12,color:"#595959"}},fmtTime(v));}},
+      { title:"操作", key:"actions", width:170, render:function(_,x){return h(Space,{size:2},h(Button,{type:"link",size:"small",onClick:function(){setSelected(x);}},"详情"),x.status!=="trashed"&&x.status!=="final"?h(Button,{type:"link",size:"small",onClick:function(){markFinal(x).catch(function(e){message.error(e.message);});}},"设为最终版"):null,x.status!=="trashed"?h(Button,{type:"link",danger:true,size:"small",onClick:function(){trash(x);}},"删除"):null);}}
+    ];
+    return h("div",{style:{height:"100%",minHeight:"100%",background:"var(--ant-color-bg-layout,#f5f5f5)",padding:"28px 32px",boxSizing:"border-box"}},
+      h("div",{style:{maxWidth:1500,margin:"0 auto"}},
+        h("header",{style:{display:"flex",alignItems:"end",justifyContent:"space-between",marginBottom:24}},h("div",null,h("div",{style:{fontSize:12,letterSpacing:".14em",fontWeight:700,color:"#1677ff",marginBottom:7}},"ARTIFACT LIBRARY"),h("h1",{style:{margin:0,fontSize:28,lineHeight:1.2,letterSpacing:"-.03em"}},"产物库"),h("div",{style:{color:"#8c8c8c",fontSize:13,marginTop:8}},"仅收录 Agent 主动登记的正式成果 · "+items.length+" 项")),h("div",{style:{fontSize:12,color:"#8c8c8c",maxWidth:380,textAlign:"right",lineHeight:1.6}},"最终版规则：同一项目、同一交付项、同一类型，只保留一个最终版。")),
+        h("section",{style:{background:"var(--ant-color-bg-container,#fff)",border:"1px solid var(--ant-color-border-secondary,#f0f0f0)",borderRadius:12,padding:16,boxShadow:"0 2px 12px rgba(0,0,0,.025)"}},
+          h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}},
+            h(Input,{allowClear:true,value:query,onChange:function(e){setQuery(e.target.value);},placeholder:"搜索名称、项目、交付项、标签或说明",prefix:"⌕",style:{width:300}}),
+            h(Select,{allowClear:true,value:project||undefined,onChange:function(v){setProject(v||"");},placeholder:"全部项目",options:projects.map(function(x){return {label:x,value:x};}),style:{width:170}}),
+            h(Select,{allowClear:true,value:type||undefined,onChange:function(v){setType(v||"");},placeholder:"全部类型",options:Object.keys(TYPES).map(function(x){return {label:TYPES[x],value:x};}),style:{width:130}}),
+            h(Select,{allowClear:true,value:status||undefined,onChange:function(v){setStatus(v||"");},placeholder:"全部状态",options:Object.keys(STATUS).map(function(x){return {label:STATUS[x],value:x};}),style:{width:130}}),
+            h("span",{style:{flex:1}}),h(Button,{type:includeTrash?"primary":"default",onClick:function(){setIncludeTrash(!includeTrash);}},includeTrash?"显示全部记录":"含回收站记录"),h(Button,{onClick:load},"刷新")
+          ),
+          busy?h("div",{style:{padding:70,textAlign:"center"}},h(Spin,null)):items.length?h(Table,{dataSource:items,rowKey:"id",columns:columns,pagination:{pageSize:12,showSizeChanger:false},size:"middle",onRow:function(x){return {onDoubleClick:function(){setSelected(x);},style:{cursor:"pointer"}};}}):h(Empty,{description:"还没有登记的正式产物。Agent 交付文件后调用 register_artifact 即可收录。",image:Empty.PRESENTED_IMAGE_SIMPLE})
+        ),
+        h(Drawer,{title:selected?selected.title:"产物详情",open:!!selected,onClose:function(){setSelected(null);},width:560,extra:selected?h(Space,null,h(Button,{onClick:function(){runShell("file",selected.path);}},"复制路径"),selected.status!=="trashed"?h(Button,{danger:true,onClick:function(){trash(selected);}},"移入回收站"):null):null},selected?h("div",null,
+          h("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:20}},h("span",{style:{fontSize:28,color:"#1677ff"}},fileIcon(selected.artifact_type)),h("div",null,h("div",{style:{fontWeight:700,fontSize:16}},selected.title),h("div",{style:{marginTop:6}},h(TypeTag,{type:selected.artifact_type})," ",h(StatusTag,{status:selected.status})))),
+          selected.status==="final"?h("div",{style:{margin:"0 0 20px",padding:"10px 12px",background:"#f6ffed",border:"1px solid #b7eb8f",borderRadius:8,fontSize:13,color:"#389e0d"}},"这是当前交付项的最终版。登记新最终版时，本记录会自动归档。 "):null,
+          h(Descriptions,{column:1,size:"small",bordered:true},h(Descriptions.Item,{label:"说明"},selected.summary),h(Descriptions.Item,{label:"项目"},selected.project),h(Descriptions.Item,{label:"交付项"},selected.deliverable),h(Descriptions.Item,{label:"标签"},(selected.tags||[]).length?selected.tags.map(function(t){return h(Tag,{key:t},t);}):"—"),h(Descriptions.Item,{label:"文件"},h("div",null,h("div",{style:{wordBreak:"break-all"}},basename(selected.path)),h("div",{style:{fontSize:12,color:"#8c8c8c",wordBreak:"break-all",marginTop:4}},selected.path))),h(Descriptions.Item,{label:"文件信息"},fmtSize(selected.size_bytes)+" · "+(selected.extension||"无后缀")+" · "+(selected.file_exists?"文件存在":"原文件未找到")),h(Descriptions.Item,{label:"来源"},(selected.agent_id||"未知 Agent")+(selected.session_id?" · "+selected.session_id:"")),h(Descriptions.Item,{label:"登记于"},fmtTime(selected.created_at)))
+        ):null)
+      )
+    );
+  }
+  if (Q.menu && Q.route) {
+    Q.route.add(pluginId,{id:"qwenpaw-artifact-library.page",path:"/artifacts",component:ArtifactLibrary});
+    Q.menu.add(pluginId,{id:"qwenpaw-artifact-library.menu",label:"产物库",icon:h("span",{style:{fontFamily:"ui-monospace,Consolas",fontWeight:700}},"▣"),route:"qwenpaw-artifact-library.page",location:"primary.agentScoped",order:65});
+  } else if (Q.registerRoutes) Q.registerRoutes(pluginId,[{path:"/artifacts",component:ArtifactLibrary,label:"产物库",icon:"▣"}]);
+})();

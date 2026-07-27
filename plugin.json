@@ -1,0 +1,16 @@
+{
+  "id": "qwenpaw-artifact-library",
+  "name": "产物库",
+  "version": "0.1.0",
+  "type": "general",
+  "description": "登记、追溯和安全管理各 Agent 的正式产物。",
+  "author": "YiQi",
+  "entry": {
+    "backend": "backend/plugin.py",
+    "frontend": "ui/index.js"
+  },
+  "dependencies": ["send2trash>=1.8.3"],
+  "qwenpaw_version": {
+    "min": "2.0.1"
+  }
+}
