@@ -1,0 +1,18 @@
+{
+  "id": "qwenpaw-artifact-library",
+  "name": "产物库",
+  "version": "0.2.2",
+  "type": "general",
+  "description": "正式产物的登记、预览、安全管理与快捷分享。",
+  "author": "YiQi",
+  "entry": {
+    "backend": "backend/plugin.py",
+    "frontend": "ui/index.js"
+  },
+  "dependencies": [
+    "send2trash>=1.8.3"
+  ],
+  "qwenpaw_version": {
+    "min": "2.0.1"
+  }
+}
