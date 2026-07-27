@@ -11,9 +11,9 @@ PLUGIN_DIR = Path(__file__).resolve().parent
 if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from qwenpaw.pawapp import PawApp
+from qwenpaw.plugins.api import PluginApi
 
 from artifact_store import (
     STATUS_LABELS,
@@ -105,20 +105,6 @@ def api_trash_artifact(artifact_id: str):
         raise _http_error(exc) from exc
 
 
-app = PawApp(name="产物库", app_id="artifact-library")
-app.include_router(router)
-
-
-@app.tool(
-    "register_artifact",
-    description=(
-        "登记一个已经真实生成、值得长期保留的正式产物到产物库。"
-        "仅在文件已写入磁盘且属于交付成果时调用；不要登记临时文件、缓存、日志或测试文件。"
-        "同一项目、同一交付项、同一类型只能有一个最终版；登记新最终版会自动归档旧最终版。"
-    ),
-    icon="▣",
-    enabled=True,
-)
 def register_artifact(
     path: str,
     title: str,
@@ -158,4 +144,24 @@ def register_artifact(
         return {"success": False, "message": f"登记失败：{exc}"}
 
 
-plugin = app
+class ArtifactLibraryPlugin:
+    """Register the API and artifact tool through the stable PluginApi."""
+
+    def register(self, api: PluginApi) -> None:
+        api.register_http_router(router, prefix="/artifact-library", tags=["artifact-library"])
+        api.register_tool(
+            tool_name="register_artifact",
+            tool_func=register_artifact,
+            description=(
+                "登记一个已经真实生成、值得长期保留的正式产物到产物库。"
+                "仅在文件已写入磁盘且属于交付成果时调用；不要登记临时文件、缓存、日志或测试文件。"
+                "同一项目、同一交付项、同一类型只能有一个最终版；登记新最终版会自动归档旧最终版。"
+            ),
+            icon="▣",
+            enabled=True,
+            tool_type="file",
+            target_param="path",
+        )
+
+
+plugin = ArtifactLibraryPlugin()
