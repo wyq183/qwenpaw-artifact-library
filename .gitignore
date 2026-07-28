@@ -8,3 +8,23 @@ dist/
 build/
 .DS_Store
 thumbs.db
+# Local development / private workspace artifacts
+_upstream/
+data/
+*.db
+*.sqlite
+.env
+.env.*
+apply_*.py
+fix_*.py
+debug_*.py
+scan_*.py
+cleanup_*.py
+final_*_test.py
+run_*_media_tests.py
+ui_test_fixture.py
+# Runtime package staging
+backend/artifact_library_v02_store.py
+test_v021_*.py
+test_api_routes.py
+update_*.py

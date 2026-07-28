@@ -16,6 +16,7 @@ if package.exists():
 # test fixtures, local paths, build cache, or historical modules are shipped.
 for source, target in [
     (root / "README.md", package / "README.md"),
+    (root / "requirements.txt", package / "requirements.txt"),
     (root / "backend" / "plugin.py", package / "backend" / "plugin.py"),
     (root / "backend" / "qwenpaw_artifact_library_store.py", package / "backend" / "qwenpaw_artifact_library_store.py"),
     (root / "ui" / "index.js", package / "ui" / "index.js"),

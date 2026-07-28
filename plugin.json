@@ -1,18 +1,39 @@
 {
   "id": "qwenpaw-artifact-library",
   "name": "产物库",
-  "version": "0.3.1",
+  "version": "0.4.3",
   "type": "general",
-  "description": "正式产物的登记、预览、安全管理、统计导出、批量操作与快捷分享。",
-  "author": "YiQi",
+  "description": "正式产物与生图资产的本地登记、预览、安全管理、统计导出、模型/LoRA 分类、星级备注与快捷复制。",
+  "author": "QwenPaw Artifact Library Contributors",
   "entry": {
     "backend": "backend/plugin.py",
     "frontend": "ui/index.js"
   },
   "dependencies": [
-    "send2trash>=1.8.3"
+    "send2trash>=1.8.3",
+    "requests>=2.28.0"
   ],
   "qwenpaw_version": {
     "min": "2.0.1"
+  },
+  "description_i18n": {
+    "zh-CN": "正式产物与生图资产的本地登记、预览、安全管理、统计导出、模型/LoRA 分类、星级备注与快捷复制。",
+    "en-US": "A local-first QwenPaw artifact and generated-image asset library for registration, preview, safe management, export, model/LoRA categorization, ratings, notes, and quick copying."
+  },
+  "meta": {
+    "category": "productivity",
+    "features": [
+      "artifact-registration",
+      "generated-image-gallery",
+      "model-lora-categorization",
+      "ratings-and-notes",
+      "safe-recycle-bin-delete",
+      "export-json-csv-markdown",
+      "agent-tool-register-artifact",
+      "local-first-privacy",
+      "community-safe-examples",
+      "release-clean-package",
+      "no-personal-workspace-paths"
+    ]
   }
 }

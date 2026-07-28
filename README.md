@@ -2,9 +2,41 @@
 
 面向任何 QwenPaw Agent 的正式产物登记与管理插件。它不是扫描式文件管理器：**只有 Agent 主动登记或用户手动登记的真实交付文件才会出现。**
 
-## 当前版本：v0.3.1
+## 当前版本：v0.4.3
 
-v0.3.1 是 v0.3.0 的回归修复版，重点恢复 v0.2 浏览体验并修复 v0.3 前后端不一致问题。
+v0.4.3 是发布前清洁修复版：在 v0.4.2 社区隐私安全文档基础上，移除代码中的个人工作区候选路径，并补齐运行依赖声明。
+
+### v0.4.3 发布前清洁修复
+
+- 移除生图助手图库自动发现逻辑中的个人工作区候选路径，社区版只保留通用本地路径与环境变量。
+- `requirements.txt` 和 `plugin.json.dependencies` 补充 `requests>=2.28.0`，匹配「发送参数到生图助手」功能的运行依赖。
+- 发布前扫描新增工作区名与禁带目录检查，避免源码和 zip 包出现个人化痕迹。
+
+### v0.4.2 社区隐私安全文档修复
+
+- README 新增「产物库 × 生图助手联动建议（社区发布版）」说明。
+- README 新增「隐私说明」，明确默认本地运行、不主动上传用户数据。
+- README 新增「社区发布去个人化检查清单」，要求文档、示例、截图、默认数据全部使用通用示例。
+- 对外示例统一使用 `example` / `demo` / `sample`，不包含私人项目名、真实路径、真实账号或真实历史记录。
+- 发布包继续使用白名单打包，只包含运行必需文件，不包含测试数据、历史 zip、上游源码镜像或本地数据库。
+
+### v0.4.1 marketplace-compat 修复
+
+- 新增根目录 `requirements.txt`，显式声明运行依赖 `send2trash>=1.8.3`，避免市场安装器只读取 requirements 时漏装依赖。
+- `plugin.json` 版本升级至 `0.4.1`。
+- `plugin.json` 补充 `description_i18n`，便于市场中英文展示。
+- `plugin.json` 补充 `meta.category` 与 `meta.features`，便于市场分类、检索和功能卡片展示。
+- README 安装命令从旧版 `0.3.1` 修正为当前 `0.4.1`。
+- 暂不新增 `manifest.yaml`，本包仍按 QwenPaw 普通插件格式发布，不切换 PawApp SDK 格式。
+- 暂不把 `type` 改为 `app`，避免误触 PawApp Center 的入口页、路由和展示位置规范。
+
+### v0.4.0 生图资产管理
+
+- 新增 **生图库视图**：专门筛选 `asset_category=generated_image` 的图片资产。
+- 支持从 **qwenpaw-image-gen 生图助手 SQLite 图库** 一键导入图片记录，自动去重，不复制原图。
+- 导入时记录模型、LoRA、星级、提示词、负向提示词、步数、CFG、Seed、尺寸等 `generation_meta`。
+- 支持按模型、LoRA、星级筛选/排序，保留原有打开位置、复制图片、复制路径、备注编辑等能力。
+- 支持在详情中快捷复制 Prompt / Negative Prompt / 参数摘要，方便复刻和二次创作。
 
 ### v0.3.1 修复内容
 
@@ -65,12 +97,145 @@ register_artifact(
 - 导出：JSON、CSV、Markdown。
 - 批量操作：批量修改项目、批量修改类型、批量移入回收站。
 
+## 产物库 × 生图助手联动建议（社区发布版）
+
+生图助手可以与 QwenPaw 产物库联动，将生成结果自动归档为可检索、可管理、可复用的本地创作资产。
+
+- **生图助手**：负责连接 ComfyUI、配置工作流、生成图片、保存生成参数。
+- **产物库**：负责长期归档、分类管理、项目整理、评分筛选和复用记录。
+
+### 生成完成后自动登记
+
+生成图片后可自动归档到 QwenPaw 产物库，便于后续按项目、模型、标签和评分进行管理。建议登记的基础元数据包括：
+
+- 图片路径
+- 生成时间
+- 使用模型
+- 正向提示词
+- 负向提示词
+- LoRA 列表
+- 采样参数
+- 图片尺寸
+- Seed
+- Workflow 信息（可选）
+
+### 产物库中显示生成参数
+
+产物库详情页可以为 AI 生成图片展示专门的「生成参数」区域：
+
+| 字段 | 内容 |
+|---|---|
+| 来源 | QwenPaw 生图助手 |
+| 后端 | ComfyUI |
+| 模型 | 用户本地模型名称或脱敏后的模型文件名 |
+| LoRA | 可选 |
+| Seed | 生成种子 |
+| Steps | 采样步数 |
+| CFG | 提示词引导系数 |
+| Sampler | 采样器 |
+| Scheduler | 调度器 |
+| 尺寸 | 宽 × 高 |
+
+社区版不要展示真实本机模型完整路径，只显示模型文件名或脱敏后的模型名称。
+
+### 从产物库复用生成参数
+
+用户可以从产物库中复用历史生成参数，将提示词、模型、采样参数发送回生图助手继续调整。推荐能力包括：
+
+- 复制提示词
+- 复制生成参数
+- 导出 workflow JSON
+- 发送参数到生图助手
+- 使用该图片参数继续迭代
+
+### AI 生成资产标准类型
+
+建议使用以下标准元数据标识 AI 生成图片：
+
+```json
+{
+  "artifact_type": "generated_image",
+  "source_plugin": "qwenpaw-image-gen",
+  "backend": "ComfyUI"
+}
+```
+
+这样产物库可以筛选全部 AI 生成图片、ComfyUI 生成图片、指定模型生成图片、指定项目下的图片、已评分图片、已收藏图片和可复用参数图片。
+
+### 通用登记示例
+
+```json
+{
+  "title": "ComfyUI 生成图片",
+  "project": "AI 图像生成项目",
+  "tags": ["ComfyUI", "generated-image", "QwenPaw"],
+  "metadata": {
+    "model_name": "example-model.safetensors",
+    "prompt": "example prompt",
+    "negative_prompt": "example negative prompt",
+    "steps": 28,
+    "cfg": 7,
+    "seed": 123456
+  }
+}
+```
+
+## 市场发布说明 / 兼容性说明
+
+- 本包是 **QwenPaw 普通插件**，入口仍使用 `plugin.json -> entry.backend/frontend`，不是 PawApp SDK 项目。
+- 因此不提供 `manifest.yaml`，也不使用 `frontend.entry` / `backend.entry` 的 PawApp manifest 风格。
+- `type` 保持 `general`，左侧栏展示和现有 Agent 工具注册逻辑不变。
+- 市场安装依赖兼容：根目录包含 `requirements.txt`，同时 `plugin.json.dependencies` 继续保留同一依赖，兼容不同安装器实现。
+- 生图资产导入只读取本机 `qwenpaw-image-gen` SQLite 图库和原图路径；不会上传图片，也不会扫描全盘。
+
+## 隐私说明
+
+本插件默认在本地运行。与生图助手联动时，生成图片及其参数仅登记到用户本机的 QwenPaw 产物库中。
+
+插件不会主动上传以下信息：
+
+- 本地文件路径
+- API Key
+- 用户账号信息
+- 聊天记录
+- 私人项目名称
+- 图片内容
+- ComfyUI 安装目录
+- 本地模型完整路径
+- 产物库真实历史记录
+
+以下信息可以仅保存在用户本机：
+
+- 图片文件路径
+- 生成参数
+- 本地模型名称
+- 本地 workflow
+- 用户自定义项目名
+- 用户备注
+
+如果用户手动将产物打包、分享或发布，请自行检查其中是否包含私人路径、真实项目名或其他敏感信息。
+
+## 社区发布去个人化检查清单
+
+社区版发布前必须确认：
+
+1. 默认本地化。
+2. 默认不联网。
+3. 默认不上传。
+4. 文档不出现私人名称、真实项目名、真实聊天记录。
+5. 示例全部使用 `example` / `demo` / `sample` 等通用名称。
+6. 截图使用干净测试数据。
+7. 打包前不包含 `data`、图库、数据库、缓存、历史 zip 或上游源码镜像。
+8. README 单独写隐私说明。
+9. 模型只显示文件名或脱敏名称，不展示本机完整路径。
+10. 发布包经过隐私关键字扫描。
+
 ## 安装
 
 插件只能在 QwenPaw 停止时安装：
 
 ```cmd
-qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.3.1.zip
+qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.3.zip
 ```
 
 安装后重新启动 QwenPaw。左侧栏会出现“产物库”。
@@ -89,7 +254,7 @@ qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.3.1.zip
 - 数据保存在 `%APPDATA%\QwenPaw\artifact-library\artifacts.json`，插件升级、重装不会丢失记录。
 - 删除始终移入 Windows 回收站，绝不退化成永久删除。
 
-## v0.3.1 已验证
+## v0.4.3 已验证
 
 第一遍：
 
@@ -104,4 +269,4 @@ qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.3.1.zip
 - 前端 JavaScript `node --check` 通过。
 - `test_notes.py`：13/13 通过。
 - `test_integration.py`：48/48 通过。
-- 解包检查确认：版本为 0.3.1；包内无旧定位 Popen 代码；包内含 `ShellExecuteW`；前端含 `/reveal`、`/picker`、`/copy`、`/copy-path` 与三视图入口。
+- 解包检查确认：版本为 0.4.3；包内根目录含 `requirements.txt`；包内含生图库视图、`/generated-images` 路由、`ShellExecuteW`；普通插件入口结构保持不变。

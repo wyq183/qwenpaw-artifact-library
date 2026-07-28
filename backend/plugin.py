@@ -11,18 +11,43 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from qwenpaw.plugins.api import PluginApi
-from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete)
+from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, send_generated_image_to_image_gen)
 
 router = APIRouter()
 class ArtifactCreate(BaseModel):
-    path: str; title: str; summary: str; project: str; deliverable: str = ""; artifact_type: str = ""; tags: list[str] = Field(default_factory=list); status: str = "delivered"; notes: str = ""
+    path: str
+    title: str
+    summary: str
+    project: str
+    deliverable: str = ""
+    artifact_type: str = ""
+    tags: list[str] = Field(default_factory=list)
+    status: str = "delivered"
+    notes: str = ""
+    asset_category: str = "general"
+    source_plugin: str = ""
+    source_id: str = ""
+    generation_meta: dict[str, Any] = Field(default_factory=dict)
+
 class ArtifactPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: Optional[str]=None; summary: Optional[str]=None; project: Optional[str]=None; deliverable: Optional[str]=None; artifact_type: Optional[str]=None; tags: Optional[list[str]]=None; status: Optional[str]=None; notes: Optional[str]=None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    project: Optional[str] = None
+    deliverable: Optional[str] = None
+    artifact_type: Optional[str] = None
+    tags: Optional[list[str]] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    asset_category: Optional[str] = None
+    generation_meta: Optional[dict[str, Any]] = None
 class BatchUpdatePayload(BaseModel):
     items: list[dict[str, Any]]
 class BatchDeletePayload(BaseModel):
     ids: list[str]
+class ImportImageGenPayload(BaseModel):
+    project: str = "生图图库"
+    limit: int = 0
 
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, (FileNotFoundError, KeyError)): return HTTPException(status_code=404, detail=str(exc))
@@ -120,12 +145,49 @@ def api_batch_delete(payload: BatchDeletePayload):
         return {"deleted": count}
     except Exception as exc: raise _http_error(exc) from exc
 
+
+# ── v0.4.0: 生图资产管理 ───────────────────────────────────────────────────
+
+@router.get("/generated-images/source-status")
+def api_generated_source_status():
+    try: return image_gen_source_status()
+    except Exception as exc: raise _http_error(exc) from exc
+
+@router.post("/generated-images/import")
+def api_import_generated_images(payload: ImportImageGenPayload):
+    try: return import_image_gen_gallery(project=payload.project, limit=payload.limit)
+    except Exception as exc: raise _http_error(exc) from exc
+
+@router.get("/generated-images")
+def api_list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", min_rating: int = 0, sort: str = "newest"):
+    try: return {"items": list_generated_images(query, model_name, lora_name, min_rating, sort), "facets": generated_image_facets()}
+    except Exception as exc: raise _http_error(exc) from exc
+
+@router.post("/generated-images/{artifact_id}/send-to-image-gen")
+def api_send_generated_to_image_gen(artifact_id: str):
+    try: return send_generated_image_to_image_gen(artifact_id)
+    except Exception as exc: raise _http_error(exc) from exc
+
 # ── Agent 工具函数 ──────────────────────────────────────────────────────────
 
-def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str="",artifact_type:str="",tags:list[str]|None=None,status:str="delivered",notes:str="")->dict[str,Any]:
+def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str="",artifact_type:str="",tags:list[str]|None=None,status:str="delivered",notes:str="",asset_category:str="general",source_plugin:str="",source_id:str="",generation_meta:dict[str,Any]|None=None)->dict[str,Any]:
     """Register a formal agent deliverable in the Artifact Library."""
     try:
-        item=create_artifact(path=path,title=title,summary=summary,project=project,deliverable=deliverable,artifact_type=artifact_type,tags=tags,status=status,notes=notes)
+        item=create_artifact(
+            path=path,
+            title=title,
+            summary=summary,
+            project=project,
+            deliverable=deliverable,
+            artifact_type=artifact_type,
+            tags=tags,
+            status=status,
+            notes=notes,
+            asset_category=asset_category,
+            source_plugin=source_plugin,
+            source_id=source_id,
+            generation_meta=generation_meta or {},
+        )
         message=f"已登记至产物库：{item['title']}（{TYPE_LABELS[item['artifact_type']]}·{STATUS_LABELS[item['status']]}）"
         if item.get("demoted_final_ids"): message+=f"；已归档 {len(item['demoted_final_ids'])} 个旧最终版"
         return {"success":True,"message":message,"artifact":item}

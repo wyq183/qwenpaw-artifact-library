@@ -18,6 +18,7 @@ import uuid
 import wave
 from pathlib import Path
 from typing import Any
+import requests
 
 DATA_ROOT = Path(os.environ.get("APPDATA", str(Path.home() / ".qwenpaw"))) / "QwenPaw" / "artifact-library"
 DATA_FILE = DATA_ROOT / "artifacts.json"
@@ -28,6 +29,7 @@ _LOCK = threading.RLock()
 
 VALID_TYPES = {"image", "document", "web", "code", "video", "audio", "archive", "data", "other"}
 VALID_STATUSES = {"draft", "delivered", "final", "archived", "trashed"}
+VALID_ASSET_CATEGORIES = {"general", "generated_image"}
 TYPE_LABELS = {"image":"图片", "document":"文档", "web":"网页", "code":"代码", "video":"视频", "audio":"音频", "archive":"压缩包", "data":"数据", "other":"其他"}
 STATUS_LABELS = {"draft":"草稿", "delivered":"已交付", "final":"最终版", "archived":"已归档", "trashed":"已移入回收站"}
 EXTENSION_TYPES = {
@@ -128,7 +130,7 @@ def _record_context() -> tuple[str, str]:
         return "unknown", ""
 
 
-def create_artifact(*, path: str, title: str, summary: str, project: str, deliverable: str = "", artifact_type: str = "", tags: list[str] | None = None, status: str = "delivered", notes: str = "", agent_id: str = "", session_id: str = "") -> dict[str, Any]:
+def create_artifact(*, path: str, title: str, summary: str, project: str, deliverable: str = "", artifact_type: str = "", tags: list[str] | None = None, status: str = "delivered", notes: str = "", agent_id: str = "", session_id: str = "", asset_category: str = "general", source_plugin: str = "", source_id: str = "", generation_meta: dict[str, Any] | None = None) -> dict[str, Any]:
     source = normalize_path(path)
     title = clean_text(title, 200, "显示名称", required=True)
     summary = clean_text(summary, 1000, "简述", required=True)
@@ -145,7 +147,7 @@ def create_artifact(*, path: str, title: str, summary: str, project: str, delive
             "deliverable":deliverable, "artifact_type":artifact_type, "tags":tags, "status":status,
             "notes":notes,
             "agent_id":agent_id or context_agent, "session_id":session_id or context_session,
-            "created_at":timestamp, "updated_at":timestamp, "trashed_at":None}
+            "created_at":timestamp, "updated_at":timestamp, "trashed_at":None, "asset_category":asset_category, "source_plugin":source_plugin, "source_id":source_id, "generation_meta":generation_meta or {}}
     with _LOCK:
         items = _load()
         existing = next((x for x in items if x.get("path", "").lower() == str(source).lower() and x.get("status") != "trashed"), None)
@@ -161,7 +163,7 @@ def list_artifacts(query: str = "", project: str = "", artifact_type: str = "", 
     result = []
     for raw in items:
         if (not include_trashed and raw.get("status") == "trashed") or (project and raw.get("project") != project) or (artifact_type and raw.get("artifact_type") != artifact_type) or (status and raw.get("status") != status): continue
-        haystack = " ".join([raw.get("title", ""), raw.get("summary", ""), raw.get("project", ""), raw.get("deliverable", ""), " ".join(raw.get("tags", []))]).lower()
+        haystack = " ".join([raw.get("title", ""), raw.get("summary", ""), raw.get("project", ""), raw.get("deliverable", ""), raw.get("notes", ""), raw.get("generation_meta", {}).get("prompt", "") if isinstance(raw.get("generation_meta"), dict) else "", raw.get("generation_meta", {}).get("model_name", "") if isinstance(raw.get("generation_meta"), dict) else "", raw.get("generation_meta", {}).get("lora_name", "") if isinstance(raw.get("generation_meta"), dict) else "", " ".join(raw.get("tags", []))]).lower()
         if query and query not in haystack: continue
         item = dict(raw); item["file_exists"] = Path(item["path"]).is_file(); result.append(item)
     return sorted(result, key=lambda x: x.get("updated_at", 0), reverse=True)
@@ -173,7 +175,7 @@ def get_artifact(artifact_id: str) -> dict[str, Any]:
 
 
 def patch_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"title", "summary", "project", "deliverable", "artifact_type", "tags", "status", "notes"}
+    allowed = {"title", "summary", "project", "deliverable", "artifact_type", "tags", "status", "notes", "asset_category", "generation_meta"}
     if set(patch) - allowed: raise ValueError("不支持修改的字段：" + ", ".join(sorted(set(patch)-allowed)))
     with _LOCK:
         items = _load(); item = _find(items, artifact_id)
@@ -184,6 +186,13 @@ def patch_artifact(artifact_id: str, patch: dict[str, Any]) -> dict[str, Any]:
                 item[key] = clean_text(str(value), 1000 if key == "summary" else 200, {"title":"显示名称", "summary":"简述", "project":"项目"}[key], required=True)
             elif key == "deliverable": item[key] = clean_text(str(value), 160, "交付项") or item["title"]
             elif key == "notes": item[key] = clean_text(str(value), 2000, "备注")
+            elif key == "asset_category":
+                v = str(value).lower().strip()
+                if v not in VALID_ASSET_CATEGORIES: raise ValueError("资产分类不合法")
+                item[key] = v
+            elif key == "generation_meta":
+                if not isinstance(value, dict): raise ValueError("生图元数据必须是对象")
+                item[key] = value
             elif key == "artifact_type":
                 if str(value).lower().strip() not in VALID_TYPES: raise ValueError("产物类型不合法")
                 item[key] = str(value).lower().strip()
@@ -609,3 +618,202 @@ def batch_delete(item_ids: list[str]) -> int:
         if changed:
             _save(all_items)
     return count
+
+
+# ── v0.4.0: 生图资产管理 / 生图助手图库导入 ────────────────────────────────
+
+def _candidate_image_gen_dbs() -> list[Path]:
+    candidates: list[Path] = []
+    env = os.environ.get("QWENPAW_IMAGE_GEN_DB")
+    if env:
+        candidates.append(Path(env))
+    here = Path(__file__).resolve()
+    # Generic local candidates only. Do not include any personal workspace name,
+    # username, absolute path, or private project name in community releases.
+    for base in [
+        here.parents[2] / "qwenpaw-image-gen" / "data" / "image_gen.db",
+        Path.home() / ".qwenpaw" / "plugins" / "qwenpaw-image-gen" / "data" / "image_gen.db",
+        Path.home() / ".qwenpaw" / "data" / "qwenpaw-image-gen" / "image_gen.db",
+    ]:
+        candidates.append(base)
+    seen: set[str] = set()
+    out: list[Path] = []
+    for c in candidates:
+        try:
+            key = str(c.resolve()).lower()
+        except OSError:
+            key = str(c).lower()
+        if key not in seen:
+            seen.add(key); out.append(c)
+    return out
+
+
+def find_image_gen_db() -> Path | None:
+    for db in _candidate_image_gen_dbs():
+        if db.is_file():
+            return db
+    return None
+
+
+def image_gen_source_status() -> dict[str, Any]:
+    db = find_image_gen_db()
+    if not db:
+        return {"available": False, "db_path": "", "total": 0, "active": 0}
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(db)); conn.row_factory = sqlite3.Row
+        total = conn.execute("SELECT COUNT(*) AS c FROM gallery_images").fetchone()["c"]
+        active = conn.execute("SELECT COUNT(*) AS c FROM gallery_images WHERE COALESCE(deleted,0)=0").fetchone()["c"]
+        conn.close()
+        return {"available": True, "db_path": str(db), "total": int(total), "active": int(active)}
+    except Exception as exc:
+        return {"available": False, "db_path": str(db), "total": 0, "active": 0, "error": str(exc)}
+
+
+def _image_gen_rows(db: Path) -> list[dict[str, Any]]:
+    import sqlite3
+    conn = sqlite3.connect(str(db)); conn.row_factory = sqlite3.Row
+    rows = conn.execute("""
+        SELECT * FROM gallery_images
+        WHERE COALESCE(deleted,0)=0
+        ORDER BY created_at DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def _image_title(row: dict[str, Any]) -> str:
+    model = Path(row.get("model_name") or "未知模型").stem
+    seed = row.get("seed", "")
+    return f"生图 {row.get('id')} · {model}" + (f" · Seed {seed}" if seed not in (None, "", -1) else "")
+
+
+def _image_tags(row: dict[str, Any]) -> list[str]:
+    tags = ["生图", "ComfyUI"]
+    model = row.get("model_name") or ""
+    lora = row.get("lora_name") or ""
+    rating = int(row.get("rating") or 0)
+    if model: tags.append("模型:" + Path(model).stem[:32])
+    if lora: tags.append("LoRA:" + Path(lora).stem[:32])
+    if rating: tags.append(f"{rating}星")
+    return tags[:12]
+
+
+def import_image_gen_gallery(project: str = "生图图库", limit: int = 0) -> dict[str, Any]:
+    """Import qwenpaw-image-gen SQLite gallery images into Artifact Library metadata."""
+    db = find_image_gen_db()
+    if not db:
+        raise FileNotFoundError("未找到生图助手图库数据库 image_gen.db")
+    rows = _image_gen_rows(db)
+    if limit and limit > 0:
+        rows = rows[:limit]
+    imported: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    with _LOCK:
+        items = _load()
+        existing_sources = {(x.get("source_plugin"), str(x.get("source_id"))) for x in items if x.get("source_plugin")}
+        existing_paths = {str(x.get("path", "")).lower() for x in items if x.get("status") != "trashed"}
+        timestamp = now()
+        for row in rows:
+            source_id = str(row.get("id"))
+            source_path = Path(row.get("file_path") or "")
+            if ("qwenpaw-image-gen", source_id) in existing_sources or str(source_path).lower() in existing_paths:
+                skipped.append({"id": source_id, "reason": "已存在"}); continue
+            if not source_path.is_file():
+                skipped.append({"id": source_id, "reason": "原图不存在"}); continue
+            meta = {
+                "prompt": row.get("prompt") or "",
+                "negative_prompt": row.get("negative_prompt") or "",
+                "model_name": row.get("model_name") or "",
+                "lora_name": row.get("lora_name") or "",
+                "rating": int(row.get("rating") or 0),
+                "steps": row.get("steps"), "cfg": row.get("cfg"), "seed": row.get("seed"),
+                "width": row.get("width"), "height": row.get("height"),
+                "generated_at": row.get("generated_at") or row.get("created_at") or "",
+            }
+            item = {"id":"art_" + uuid.uuid4().hex[:12], **file_meta(source_path),
+                    "title": _image_title(row),
+                    "summary": (row.get("prompt") or "生图助手生成图片")[:1000],
+                    "project": clean_text(project, 160, "项目", required=True),
+                    "deliverable": "生图图库",
+                    "artifact_type": "image", "tags": _image_tags(row), "status": "delivered",
+                    "notes": clean_text(row.get("notes") or "", 2000, "备注"),
+                    "agent_id": "qwenpaw-image-gen", "session_id": "",
+                    "created_at": timestamp, "updated_at": timestamp, "trashed_at": None,
+                    "asset_category": "generated_image", "source_plugin": "qwenpaw-image-gen",
+                    "source_id": source_id, "generation_meta": meta}
+            items.append(item); imported.append(dict(item))
+        if imported:
+            _save(items)
+    return {"imported": len(imported), "skipped": len(skipped), "items": imported, "skipped_items": skipped, "db_path": str(db)}
+
+
+def list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", min_rating: int = 0, sort: str = "newest") -> list[dict[str, Any]]:
+    query = (query or "").strip().lower()
+    with _LOCK:
+        rows = [dict(x) for x in _load() if x.get("asset_category") == "generated_image" and x.get("status") != "trashed"]
+    result = []
+    for item in rows:
+        meta = item.get("generation_meta") if isinstance(item.get("generation_meta"), dict) else {}
+        if model_name and meta.get("model_name") != model_name: continue
+        if lora_name and meta.get("lora_name") != lora_name: continue
+        if min_rating and int(meta.get("rating") or 0) < min_rating: continue
+        hay = " ".join([item.get("title", ""), item.get("summary", ""), item.get("notes", ""), meta.get("prompt", ""), meta.get("negative_prompt", ""), meta.get("model_name", ""), meta.get("lora_name", "")]).lower()
+        if query and query not in hay: continue
+        item["file_exists"] = Path(item["path"]).is_file()
+        result.append(item)
+    if sort == "rating":
+        result.sort(key=lambda x: (int((x.get("generation_meta") or {}).get("rating") or 0), x.get("created_at", 0)), reverse=True)
+    elif sort == "model":
+        result.sort(key=lambda x: ((x.get("generation_meta") or {}).get("model_name") or "", -x.get("created_at", 0)))
+    else:
+        result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+    return result
+
+
+def generated_image_facets() -> dict[str, Any]:
+    rows = list_generated_images()
+    models: dict[str, int] = {}; loras: dict[str, int] = {}; ratings: dict[str, int] = {}
+    for item in rows:
+        meta = item.get("generation_meta") or {}
+        m = meta.get("model_name") or "未记录模型"; models[m] = models.get(m, 0) + 1
+        l = meta.get("lora_name") or "未使用/未记录 LoRA"; loras[l] = loras.get(l, 0) + 1
+        r = str(int(meta.get("rating") or 0)); ratings[r] = ratings.get(r, 0) + 1
+    return {"total": len(rows), "models": models, "loras": loras, "ratings": ratings}
+
+
+def send_generated_image_to_image_gen(artifact_id: str, api_url: str | None = None) -> dict[str, Any]:
+    """Best-effort forward a generated-image artifact back to image-gen as a draft."""
+    item = get_artifact(artifact_id)
+    if item.get("asset_category") != "generated_image":
+        raise ValueError("该产物不是生图资产")
+    meta = item.get("generation_meta") if isinstance(item.get("generation_meta"), dict) else {}
+    api_root = (api_url or os.environ.get("QWENPAW_IMAGE_GEN_API_URL") or "http://127.0.0.1:14999").rstrip("/")
+    payload = {
+        "artifact_id": artifact_id,
+        "prompt": meta.get("prompt") or item.get("summary") or "",
+        "negative_prompt": meta.get("negative_prompt") or "",
+        "model_name": meta.get("model_name") or "",
+        "lora_name": meta.get("lora_name") or "",
+        "loras": meta.get("loras") or [],
+        "steps": meta.get("steps") or 20,
+        "cfg": meta.get("cfg") or 7.0,
+        "seed": meta.get("seed") or -1,
+        "width": meta.get("width") or 1024,
+        "height": meta.get("height") or 1024,
+        "workflow_json": meta.get("workflow_json") or {},
+    }
+    endpoints = [
+        f"{api_root}/image-gen/recipe-draft",
+        f"{api_root}/image-gen/recipes/draft",
+    ]
+    last_error = None
+    for url in endpoints:
+        try:
+            r = requests.post(url, json=payload, timeout=10)
+            if r.status_code < 500:
+                data = r.json() if r.content else {}
+                return {"success": True, "endpoint": url, "response": data}
+        except Exception as exc:
+            last_error = str(exc)
+    return {"success": False, "error": last_error or "无法发送到生图助手"}
