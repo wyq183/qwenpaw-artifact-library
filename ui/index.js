@@ -8,7 +8,7 @@
     Descriptions = antd.Descriptions, Space = antd.Space, message = antd.message,
     Spin = antd.Spin, Dropdown = antd.Dropdown, Card = antd.Card, Radio = antd.Radio, Rate = antd.Rate;
   var pluginId = "qwenpaw-artifact-library";
-  var PLUGIN_VERSION = "0.4.4";
+  var PLUGIN_VERSION = "0.4.5";
   var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
   var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
   var TYPE_COLOR = { image:"magenta", document:"blue", web:"cyan", code:"purple", video:"volcano", audio:"gold", archive:"orange", data:"geekblue", other:"default" };

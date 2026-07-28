@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """QwenPaw Artifact Library — backend routes and agent registration tool."""
 from __future__ import annotations
+import json
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -170,6 +171,27 @@ def api_send_generated_to_image_gen(artifact_id: str):
 
 # ── Agent 工具函数 ──────────────────────────────────────────────────────────
 
+def _cleanup_old_frontend(root_dir: Path) -> None:
+    """启动时自动清理旧版本的版本化前端入口，只保留当前版本 + index.js 兼容副本。"""
+    ui_dir = root_dir / "ui"
+    if not ui_dir.is_dir():
+        return
+    try:
+        pj = json.loads((root_dir / "plugin.json").read_text(encoding="utf-8"))
+        version = pj.get("version", "")
+    except Exception:
+        return
+    if not version:
+        return
+    current_entry = f"index.v{version}.js"
+    for f in sorted(ui_dir.glob("index.*.js")):
+        if f.name == current_entry or f.name == "index.js":
+            continue
+        try:
+            f.unlink()
+        except Exception:
+            pass
+
 def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str="",artifact_type:str="",tags:list[str]|None=None,status:str="delivered",notes:str="",asset_category:str="general",source_plugin:str="",source_id:str="",generation_meta:dict[str,Any]|None=None)->dict[str,Any]:
     """Register a formal agent deliverable in the Artifact Library."""
     try:
@@ -194,6 +216,8 @@ def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str
     except Exception as exc: return {"success":False,"message":f"登记失败：{exc}"}
 class ArtifactLibraryPlugin:
     def register(self,api:PluginApi)->None:
+        # 插件启动时清理旧版本前端，只保留当前版本入口 + 兼容副本
+        _cleanup_old_frontend(PLUGIN_DIR.parent)
         api.register_http_router(router,prefix="/artifact-library",tags=["artifact-library"])
         api.register_tool(tool_name="register_artifact",tool_func=register_artifact,description="登记一个已经真实生成、值得长期保留的正式产物到产物库。仅在文件已写入磁盘且属于交付成果时调用；不要登记临时文件、缓存、日志或测试文件。同一项目、同一交付项、同一类型只能有一个最终版；登记新最终版会自动归档旧最终版。",icon="▣",enabled=True,tool_type="file",target_param="path")
         # 注册 skill provider，自动加载 skills/ 目录

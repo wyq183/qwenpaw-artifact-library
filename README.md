@@ -2,13 +2,19 @@
 
 面向任何 QwenPaw Agent 的正式产物登记与管理插件。它不是扫描式文件管理器：**只有 Agent 主动登记或用户手动登记的真实交付文件才会出现。**
 
-## 当前版本：v0.4.4
+## 当前版本：v0.4.5
 
-v0.4.4 是前端缓存修复版：插件入口改为随版本变化的 `ui/index.v0.4.4.js`，避免老用户升级后 Electron / WebView 继续加载旧版 `ui/index.js` 缓存。页面顶部会显示当前运行版本，便于确认新界面已生效。
+v0.4.5 是启动自清理版：续 v0.4.4 版本化前端入口方案的基础上，在插件启动时自动扫描 `ui/` 目录，仅保留当前版本入口及 `index.js` 兼容副本，彻底杜绝旧文件残留导致的缓存问题。
+
+### v0.4.5 启动自清理
+
+- 插件每次加载时自动遍历 `ui/` 目录，清除所有非当前版本的 `index.v*.js` 文件。
+- 升级后旧版入口文件物理删除，WebView 无法回退到已不存在的旧资源，实现真正根治。
+- `index.js` 兼容副本不受影响，始终保留以供后备。
 
 ### v0.4.4 前端缓存修复
 
-- `plugin.json.entry.frontend` 改为 `ui/index.v0.4.4.js`，升级后资源路径变化，减少旧 UI 缓存命中。
+- `plugin.json.entry.frontend` 改为 `ui/index.v0.4.5.js`，升级后资源路径变化，减少旧 UI 缓存命中。
 - 构建脚本会按 `plugin.json.version` 自动生成版本化前端入口，并保留 `ui/index.js` 作为兼容副本。
 - `plugin.json` 同时提供 `qwenpaw_version.min` 与平台兼容字段 `min_version`，避免社区发布表单无法填充最低版本。
 - 页面标题区显示运行版本，用户可直接确认当前加载的是新版前端。
@@ -243,7 +249,7 @@ register_artifact(
 插件只能在 QwenPaw 停止时安装：
 
 ```cmd
-qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.4.zip
+qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.5.zip
 ```
 
 安装后重新启动 QwenPaw。左侧栏会出现“产物库”。
@@ -262,7 +268,7 @@ qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.4.zip
 - 数据保存在 `%APPDATA%\QwenPaw\artifact-library\artifacts.json`，插件升级、重装不会丢失记录。
 - 删除始终移入 Windows 回收站，绝不退化成永久删除。
 
-## v0.4.4 已验证
+## v0.4.5 已验证
 
 第一遍：
 
@@ -277,4 +283,4 @@ qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.4.zip
 - 前端 JavaScript `node --check` 通过。
 - `test_notes.py`：13/13 通过。
 - `test_integration.py`：49/49 通过。
-- 解包检查确认：版本为 0.4.4；前端入口为 `ui/index.v0.4.4.js`；包内同时含兼容副本 `ui/index.js`；包内根目录含 `requirements.txt`；包内含生图库视图、`/generated-images` 路由、`ShellExecuteW`。
+- 解包检查确认：版本为 0.4.5；前端入口为 `ui/index.v0.4.5.js`；包内同时含兼容副本 `ui/index.js`；包内根目录含 `requirements.txt`；包内含生图库视图、`/generated-images` 路由、`ShellExecuteW`；`plugin.py` 含启动自清理逻辑。
