@@ -1,13 +1,13 @@
 {
   "id": "qwenpaw-artifact-library",
   "name": "产物库",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "type": "general",
   "description": "正式产物与生图资产的本地登记、预览、安全管理、统计导出、模型/LoRA 分类、星级备注与快捷复制。",
   "author": "QwenPaw Artifact Library Contributors",
   "entry": {
     "backend": "backend/plugin.py",
-    "frontend": "ui/index.js"
+    "frontend": "ui/index.v0.4.4.js"
   },
   "dependencies": [
     "send2trash>=1.8.3",
@@ -33,7 +33,9 @@
       "local-first-privacy",
       "community-safe-examples",
       "release-clean-package",
-      "no-personal-workspace-paths"
+      "no-personal-workspace-paths",
+      "cache-busting-versioned-frontend-entry",
+      "visible-runtime-version"
     ]
   }
 }

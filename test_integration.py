@@ -86,7 +86,9 @@ if os.path.exists(build_zip):
     check("ZIP contains backend/plugin.py", "backend/plugin.py" in names)
     check("ZIP contains backend/qwenpaw_artifact_library_store.py",
           "backend/qwenpaw_artifact_library_store.py" in names)
-    check("ZIP contains ui/index.js", "ui/index.js" in names)
+    frontend_entry = json.loads(zipfile.ZipFile(build_zip).read("plugin.json"))["entry"]["frontend"]
+    check("ZIP contains ui/index.js compatibility copy", "ui/index.js" in names)
+    check("ZIP contains versioned frontend entry", frontend_entry in names, frontend_entry)
     check("ZIP contains skills/artifact-register/SKILL.md",
           "skills/artifact-register/SKILL.md" in names)
     check("ZIP contains README.md", "README.md" in names)

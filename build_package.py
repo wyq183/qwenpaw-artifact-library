@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -14,17 +15,26 @@ if package.exists():
 
 # Package only reviewable runtime files. No development data, source archives,
 # test fixtures, local paths, build cache, or historical modules are shipped.
+manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+version = manifest["version"]
+frontend_entry = manifest.get("entry", {}).get("frontend", "ui/index.js")
+versioned_frontend = f"ui/index.v{version}.js"
+if frontend_entry != versioned_frontend:
+    raise SystemExit(f"plugin.json entry.frontend must be {versioned_frontend}, got {frontend_entry}")
+if not re.fullmatch(r"ui/index\.v\d+\.\d+\.\d+(?:[-+][A-Za-z0-9._-]+)?\.js", frontend_entry):
+    raise SystemExit(f"unexpected frontend entry path: {frontend_entry}")
+
 for source, target in [
     (root / "README.md", package / "README.md"),
     (root / "requirements.txt", package / "requirements.txt"),
     (root / "backend" / "plugin.py", package / "backend" / "plugin.py"),
     (root / "backend" / "qwenpaw_artifact_library_store.py", package / "backend" / "qwenpaw_artifact_library_store.py"),
     (root / "ui" / "index.js", package / "ui" / "index.js"),
+    (root / "ui" / "index.js", package / frontend_entry),
     (root / "skills" / "artifact-register" / "SKILL.md", package / "skills" / "artifact-register" / "SKILL.md"),
 ]:
     shutil.copy2(source, target)
 
-manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
 (package / "plugin.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )

@@ -28,3 +28,6 @@ backend/artifact_library_v02_store.py
 test_v021_*.py
 test_api_routes.py
 update_*.py
+
+content_hash_check.py
+verify_*.py

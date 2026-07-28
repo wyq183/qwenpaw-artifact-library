@@ -1,4 +1,4 @@
-/* QwenPaw Artifact Library — runtime frontend plugin. v0.4.0 */
+/* QwenPaw Artifact Library — runtime frontend plugin. v0.4.4 */
 (function () {
   var Q = window.QwenPaw;
   if (!Q || !Q.host) return console.error("[artifact-library] Host SDK unavailable");
@@ -8,6 +8,7 @@
     Descriptions = antd.Descriptions, Space = antd.Space, message = antd.message,
     Spin = antd.Spin, Dropdown = antd.Dropdown, Card = antd.Card, Radio = antd.Radio, Rate = antd.Rate;
   var pluginId = "qwenpaw-artifact-library";
+  var PLUGIN_VERSION = "0.4.4";
   var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
   var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
   var TYPE_COLOR = { image:"magenta", document:"blue", web:"cyan", code:"purple", video:"volcano", audio:"gold", archive:"orange", data:"geekblue", other:"default" };
@@ -128,7 +129,7 @@
     var body = busy?h("div",{style:{padding:70,textAlign:"center"}},h(Spin,null)):(view==="generated"?renderGenerated():items.length?(view==="cards"?renderCards():view==="projects"?renderProjects():h(Table,{rowSelection:rowSelection,dataSource:items,rowKey:"id",columns:columns,pagination:{pageSize:12,showSizeChanger:false},size:"middle",onRow:function(x){return {onDoubleClick:function(){openDetail(x);},style:{cursor:"pointer"}};} })):h(Empty,{description:"还没有登记的正式产物。Agent 交付文件后调用 register_artifact 即可收录。",image:Empty.PRESENTED_IMAGE_SIMPLE}));
 
     return h("div",{style:{height:"100%",minHeight:"100%",background:"var(--ant-color-bg-layout,#f5f5f5)",padding:"28px 32px",boxSizing:"border-box"}}, h("div",{style:{maxWidth:1500,margin:"0 auto"}},
-      h("header",{style:{display:"flex",alignItems:"end",justifyContent:"space-between",marginBottom:24}},h("div",null,h("div",{style:{fontSize:12,letterSpacing:".14em",fontWeight:700,color:"#1677ff",marginBottom:7}},"ARTIFACT LIBRARY"),h("h1",{style:{margin:0,fontSize:28,lineHeight:1.2,letterSpacing:"-.03em"}},"产物库"),h("div",{style:{color:"#8c8c8c",fontSize:13,marginTop:8}},"正式成果 + 生图资产管理 · "+(view==="generated"?genItems.length:items.length)+" 项")),h("div",{style:{fontSize:12,color:"#8c8c8c",maxWidth:500,textAlign:"right",lineHeight:1.6}},"v0.4.0：生图助手负责生成，产物库负责长期筛选、备注、星级、Prompt 复用与交付归档。")),
+      h("header",{style:{display:"flex",alignItems:"end",justifyContent:"space-between",marginBottom:24}},h("div",null,h("div",{style:{fontSize:12,letterSpacing:".14em",fontWeight:700,color:"#1677ff",marginBottom:7}},"ARTIFACT LIBRARY"),h("h1",{style:{margin:0,fontSize:28,lineHeight:1.2,letterSpacing:"-.03em"}},"产物库"),h("div",{style:{color:"#8c8c8c",fontSize:13,marginTop:8}},"正式成果 + 生图资产管理 · "+(view==="generated"?genItems.length:items.length)+" 项")),h("div",{style:{fontSize:12,color:"#8c8c8c",maxWidth:500,textAlign:"right",lineHeight:1.6}},"v" + PLUGIN_VERSION + "：已使用版本化前端入口，升级后可避开旧版界面缓存；生图资产、备注、星级与交付归档继续可用。")),
       h("section",{style:{background:"var(--ant-color-bg-container,#fff)",border:"1px solid var(--ant-color-border-secondary,#f0f0f0)",borderRadius:12,padding:16,boxShadow:"0 2px 12px rgba(0,0,0,.025)"}},
         h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}},
           h(Input,{allowClear:true,value:query,onChange:function(e){setQuery(e.target.value);},placeholder:view==="generated"?"搜索 prompt、模型、LoRA、备注":"搜索名称、项目、交付项、标签或说明",prefix:"⌕",style:{width:310}}),

@@ -2,9 +2,16 @@
 
 面向任何 QwenPaw Agent 的正式产物登记与管理插件。它不是扫描式文件管理器：**只有 Agent 主动登记或用户手动登记的真实交付文件才会出现。**
 
-## 当前版本：v0.4.3
+## 当前版本：v0.4.4
 
-v0.4.3 是发布前清洁修复版：在 v0.4.2 社区隐私安全文档基础上，移除代码中的个人工作区候选路径，并补齐运行依赖声明。
+v0.4.4 是前端缓存修复版：插件入口改为随版本变化的 `ui/index.v0.4.4.js`，避免老用户升级后 Electron / WebView 继续加载旧版 `ui/index.js` 缓存。页面顶部会显示当前运行版本，便于确认新界面已生效。
+
+### v0.4.4 前端缓存修复
+
+- `plugin.json.entry.frontend` 改为 `ui/index.v0.4.4.js`，升级后资源路径变化，减少旧 UI 缓存命中。
+- 构建脚本会按 `plugin.json.version` 自动生成版本化前端入口，并保留 `ui/index.js` 作为兼容副本。
+- 页面标题区显示运行版本，用户可直接确认当前加载的是新版前端。
+- 若升级后界面仍未变化，建议重启 QwenPaw Desktop；仍异常时可卸载旧插件后重新安装新版。
 
 ### v0.4.3 发布前清洁修复
 
@@ -235,7 +242,7 @@ register_artifact(
 插件只能在 QwenPaw 停止时安装：
 
 ```cmd
-qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.3.zip
+qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.4.zip
 ```
 
 安装后重新启动 QwenPaw。左侧栏会出现“产物库”。
@@ -254,19 +261,19 @@ qwenpaw plugin install C:\path\to\qwenpaw-artifact-library-0.4.3.zip
 - 数据保存在 `%APPDATA%\QwenPaw\artifact-library\artifacts.json`，插件升级、重装不会丢失记录。
 - 删除始终移入 Windows 回收站，绝不退化成永久删除。
 
-## v0.4.3 已验证
+## v0.4.4 已验证
 
 第一遍：
 
 - Python 静态编译通过。
 - 前端 JavaScript `node --check` 通过。
 - `test_notes.py`：13/13 通过。
-- `test_integration.py`：48/48 通过。
+- `test_integration.py`：49/49 通过。
 
 第二遍：
 
 - Python 静态编译通过。
 - 前端 JavaScript `node --check` 通过。
 - `test_notes.py`：13/13 通过。
-- `test_integration.py`：48/48 通过。
-- 解包检查确认：版本为 0.4.3；包内根目录含 `requirements.txt`；包内含生图库视图、`/generated-images` 路由、`ShellExecuteW`；普通插件入口结构保持不变。
+- `test_integration.py`：49/49 通过。
+- 解包检查确认：版本为 0.4.4；前端入口为 `ui/index.v0.4.4.js`；包内同时含兼容副本 `ui/index.js`；包内根目录含 `requirements.txt`；包内含生图库视图、`/generated-images` 路由、`ShellExecuteW`。
