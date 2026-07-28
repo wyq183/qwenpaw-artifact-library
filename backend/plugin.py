@@ -184,6 +184,9 @@ def _cleanup_old_frontend(root_dir: Path) -> None:
     if not version:
         return
     current_entry = f"index.v{version}.js"
+    # 安全阀：如果当前版本文件不存在于目录中，则什么都不删
+    if not (ui_dir / current_entry).is_file():
+        return
     for f in sorted(ui_dir.glob("index.*.js")):
         if f.name == current_entry or f.name == "index.js":
             continue
