@@ -22,6 +22,7 @@ Call the `register_artifact` tool with these parameters:
 - `artifact_type`: One of image, document, web, code, video, audio, archive, data, other (auto-detected if omitted)
 - `tags`: Array of keyword tags
 - `status`: One of draft, delivered, final (defaults to "delivered")
+- `notes`: Optional remarks for later review
 
 ## Example
 
@@ -31,7 +32,8 @@ register_artifact(
   title="季度总结报告",
   summary="2026 Q3 项目总结，包含核心指标与改进建议",
   project="项目A",
-  tags=["报告","季度"]
+  tags=["报告","季度"],
+  notes="可选备注"
 )
 ```
 

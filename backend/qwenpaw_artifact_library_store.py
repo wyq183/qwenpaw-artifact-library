@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import datetime
 import hashlib
 import json
@@ -215,17 +216,29 @@ def _send_to_windows_recycle_bin(source: Path) -> None:
         raise RuntimeError("无法安全移入 Windows 回收站；已取消删除，原文件未被永久删除")
 
 
+def _move_file_to_recycle_bin(source: Path) -> None:
+    """Move a file to the OS recycle bin/trash without ever falling back to permanent deletion."""
+    try:
+        from send2trash import send2trash
+        send2trash(str(source))
+        return
+    except Exception as first_exc:
+        if os.name == "nt":
+            try:
+                _send_to_windows_recycle_bin(source)
+                return
+            except Exception as second_exc:
+                raise RuntimeError(f"无法安全移入回收站：{second_exc}") from first_exc
+        raise RuntimeError(f"无法安全移入回收站：{first_exc}") from first_exc
+
+
 def move_to_trash(artifact_id: str) -> dict[str, Any]:
     with _LOCK:
         items = _load(); item = _find(items, artifact_id)
         if item.get("status") == "trashed": return dict(item)
         source = Path(item["path"])
         if not source.is_file(): raise FileNotFoundError("原文件已不存在，未执行删除")
-        try:
-            from send2trash import send2trash
-            send2trash(str(source))
-        except ImportError:
-            _send_to_windows_recycle_bin(source)
+        _move_file_to_recycle_bin(source)
         item["status"] = "trashed"; item["trashed_at"] = now(); item["updated_at"] = item["trashed_at"]
         _save(items); return dict(item)
 
@@ -254,7 +267,12 @@ def reveal_in_folder(artifact_id: str) -> None:
     item = get_artifact(artifact_id); source = Path(item["path"])
     if not source.is_file(): raise FileNotFoundError("原文件已不存在，无法定位")
     if os.name == "nt":
-        subprocess.Popen(["explorer.exe", "/select," + str(source)], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        # Do not use CREATE_NO_WINDOW here: explorer.exe is a GUI process and
+        # some QwenPaw/Windows combinations hide it when launched via Popen.
+        # ShellExecuteW reliably opens Explorer and selects the target file.
+        rc = ctypes.windll.shell32.ShellExecuteW(None, "open", "explorer.exe", f'/select,"{source}"', None, 1)
+        if rc <= 32:
+            raise RuntimeError(f"无法打开资源管理器定位文件（ShellExecuteW={rc}）")
     else:
         raise RuntimeError("当前版本的定位功能仅支持 Windows")
 
@@ -405,33 +423,29 @@ def copy_artifact_path_to_clipboard(artifact_id: str) -> dict[str, str]:
 
 
 def get_stats() -> dict[str, Any]:
-    """返回按项目/类型/状态分类的统计。"""
+    """返回统计。total 含全部记录；分类统计默认只统计未移入回收站的活动记录。"""
     with _LOCK:
         items = _load()
 
     total = len(items)
-    active = sum(1 for i in items if i.get("status") != "trashed")
+    active_items = [i for i in items if i.get("status") != "trashed"]
 
     by_project: dict[str, int] = {}
     by_type: dict[str, int] = {}
     by_status: dict[str, int] = {}
 
-    for item in items:
-        if item.get("status") == "trashed" and not True:  # 默认排除回收站
-            continue
-        p = item.get("project", "未知")
+    for item in active_items:
+        p = item.get("project", "未知") or "未知"
         by_project[p] = by_project.get(p, 0) + 1
-
-        t = item.get("artifact_type", "other")
+        t = item.get("artifact_type", "other") or "other"
         by_type[t] = by_type.get(t, 0) + 1
-
-        s = item.get("status", "unknown")
-        by_status[s] = by_status.get(s, 0) + 1
+        st = item.get("status", "unknown") or "unknown"
+        by_status[st] = by_status.get(st, 0) + 1
 
     return {
         "total": total,
-        "active": active,
-        "trashed": total - active,
+        "active": len(active_items),
+        "trashed": total - len(active_items),
         "by_project": by_project,
         "by_type": by_type,
         "by_status": by_status,
@@ -569,22 +583,29 @@ def batch_update(items_to_update: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def batch_delete(item_ids: list[str]) -> int:
-    """批量移入回收站（标记 trashed，不删原文件）。
-    返回成功处理的条目数。"""
+    """批量移入 Windows 回收站。
+    与单个删除保持一致：先安全移动原文件，再把元数据标记为 trashed。
+    单项失败会跳过，绝不永久删除。返回成功处理的条目数。"""
     count = 0
     with _LOCK:
         all_items = _load()
+        changed = False
         for artifact_id in item_ids:
             try:
                 item = _find(all_items, artifact_id)
                 if item.get("status") == "trashed":
                     continue
+                source = Path(item["path"])
+                if not source.is_file():
+                    continue
+                _move_file_to_recycle_bin(source)
                 item["status"] = "trashed"
                 item["trashed_at"] = now()
                 item["updated_at"] = item["trashed_at"]
                 count += 1
-            except KeyError:
+                changed = True
+            except (KeyError, OSError, RuntimeError):
                 continue
-        if count:
+        if changed:
             _save(all_items)
     return count

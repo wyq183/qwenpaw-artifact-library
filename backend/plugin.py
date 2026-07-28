@@ -15,10 +15,10 @@ from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_f
 
 router = APIRouter()
 class ArtifactCreate(BaseModel):
-    path: str; title: str; summary: str; project: str; deliverable: str = ""; artifact_type: str = ""; tags: list[str] = Field(default_factory=list); status: str = "delivered"
+    path: str; title: str; summary: str; project: str; deliverable: str = ""; artifact_type: str = ""; tags: list[str] = Field(default_factory=list); status: str = "delivered"; notes: str = ""
 class ArtifactPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    title: Optional[str]=None; summary: Optional[str]=None; project: Optional[str]=None; deliverable: Optional[str]=None; artifact_type: Optional[str]=None; tags: Optional[list[str]]=None; status: Optional[str]=None
+    title: Optional[str]=None; summary: Optional[str]=None; project: Optional[str]=None; deliverable: Optional[str]=None; artifact_type: Optional[str]=None; tags: Optional[list[str]]=None; status: Optional[str]=None; notes: Optional[str]=None
 class BatchUpdatePayload(BaseModel):
     items: list[dict[str, Any]]
 class BatchDeletePayload(BaseModel):
@@ -122,10 +122,10 @@ def api_batch_delete(payload: BatchDeletePayload):
 
 # ── Agent 工具函数 ──────────────────────────────────────────────────────────
 
-def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str="",artifact_type:str="",tags:list[str]|None=None,status:str="delivered")->dict[str,Any]:
+def register_artifact(path:str,title:str,summary:str,project:str,deliverable:str="",artifact_type:str="",tags:list[str]|None=None,status:str="delivered",notes:str="")->dict[str,Any]:
     """Register a formal agent deliverable in the Artifact Library."""
     try:
-        item=create_artifact(path=path,title=title,summary=summary,project=project,deliverable=deliverable,artifact_type=artifact_type,tags=tags,status=status)
+        item=create_artifact(path=path,title=title,summary=summary,project=project,deliverable=deliverable,artifact_type=artifact_type,tags=tags,status=status,notes=notes)
         message=f"已登记至产物库：{item['title']}（{TYPE_LABELS[item['artifact_type']]}·{STATUS_LABELS[item['status']]}）"
         if item.get("demoted_final_ids"): message+=f"；已归档 {len(item['demoted_final_ids'])} 个旧最终版"
         return {"success":True,"message":message,"artifact":item}

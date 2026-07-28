@@ -28,7 +28,7 @@ manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
 )
 
-zip_path = root / "qwenpaw-artifact-library-0.3.0.zip"
+zip_path = root / f"qwenpaw-artifact-library-{manifest['version']}.zip"
 if zip_path.exists():
     zip_path.unlink()
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
