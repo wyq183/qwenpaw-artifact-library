@@ -10,6 +10,7 @@ v0.4.4 是前端缓存修复版：插件入口改为随版本变化的 `ui/index
 
 - `plugin.json.entry.frontend` 改为 `ui/index.v0.4.4.js`，升级后资源路径变化，减少旧 UI 缓存命中。
 - 构建脚本会按 `plugin.json.version` 自动生成版本化前端入口，并保留 `ui/index.js` 作为兼容副本。
+- `plugin.json` 同时提供 `qwenpaw_version.min` 与平台兼容字段 `min_version`，避免社区发布表单无法填充最低版本。
 - 页面标题区显示运行版本，用户可直接确认当前加载的是新版前端。
 - 若升级后界面仍未变化，建议重启 QwenPaw Desktop；仍异常时可卸载旧插件后重新安装新版。
 
