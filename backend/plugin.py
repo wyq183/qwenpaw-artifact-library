@@ -9,12 +9,26 @@ from typing import Any, Optional
 PLUGIN_DIR = Path(__file__).resolve().parent
 if str(PLUGIN_DIR) not in sys.path: sys.path.insert(0, str(PLUGIN_DIR))
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from qwenpaw.plugins.api import PluginApi
 from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, send_generated_image_to_image_gen)
 
+def _runtime_version() -> str:
+    """Read the installed manifest at runtime; never trust a frontend hard-coded version alone."""
+    try:
+        return str(json.loads((PLUGIN_DIR.parent / "plugin.json").read_text(encoding="utf-8")).get("version") or "unknown")
+    except Exception:
+        return "unknown"
+
+
 router = APIRouter()
+
+@router.get("/version")
+def api_version():
+    # no-store prevents Electron/WebView and intermediaries from reusing a stale handshake result.
+    return JSONResponse({"version": _runtime_version(), "plugin_id": "qwenpaw-artifact-library"}, headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0", "Pragma":"no-cache", "Expires":"0"})
+
 class ArtifactCreate(BaseModel):
     path: str
     title: str
@@ -46,6 +60,7 @@ class BatchUpdatePayload(BaseModel):
     items: list[dict[str, Any]]
 class BatchDeletePayload(BaseModel):
     ids: list[str]
+    force: bool = False
 class ImportImageGenPayload(BaseModel):
     project: str = "生图图库"
     limit: int = 0
@@ -72,8 +87,8 @@ def api_patch_artifact(artifact_id:str,payload:ArtifactPatch):
     try: return patch_artifact(artifact_id,payload.model_dump(exclude_none=True))
     except Exception as exc: raise _http_error(exc) from exc
 @router.post("/artifacts/{artifact_id}/trash")
-def api_trash_artifact(artifact_id:str):
-    try: return move_to_trash(artifact_id)
+def api_trash_artifact(artifact_id:str, force:bool=False):
+    try: return move_to_trash(artifact_id, force=force)
     except Exception as exc: raise _http_error(exc) from exc
 @router.post("/picker")
 def api_picker():
@@ -142,7 +157,7 @@ def api_batch_update(payload: BatchUpdatePayload):
 @router.post("/batch/delete")
 def api_batch_delete(payload: BatchDeletePayload):
     try:
-        count = batch_delete(payload.ids)
+        count = batch_delete(payload.ids, force=payload.force)
         return {"deleted": count}
     except Exception as exc: raise _http_error(exc) from exc
 
@@ -160,8 +175,8 @@ def api_import_generated_images(payload: ImportImageGenPayload):
     except Exception as exc: raise _http_error(exc) from exc
 
 @router.get("/generated-images")
-def api_list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", min_rating: int = 0, sort: str = "newest"):
-    try: return {"items": list_generated_images(query, model_name, lora_name, min_rating, sort), "facets": generated_image_facets()}
+def api_list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", category: str = "", min_rating: int = 0, sort: str = "newest"):
+    try: return {"items": list_generated_images(query, model_name, lora_name, category, min_rating, sort), "facets": generated_image_facets()}
     except Exception as exc: raise _http_error(exc) from exc
 
 @router.post("/generated-images/{artifact_id}/send-to-image-gen")

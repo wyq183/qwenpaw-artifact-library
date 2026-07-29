@@ -241,12 +241,17 @@ def _move_file_to_recycle_bin(source: Path) -> None:
         raise RuntimeError(f"无法安全移入回收站：{first_exc}") from first_exc
 
 
-def move_to_trash(artifact_id: str) -> dict[str, Any]:
+def move_to_trash(artifact_id: str, force: bool = False) -> dict[str, Any]:
     with _LOCK:
         items = _load(); item = _find(items, artifact_id)
         if item.get("status") == "trashed": return dict(item)
         source = Path(item["path"])
-        if not source.is_file(): raise FileNotFoundError("原文件已不存在，未执行删除")
+        if not source.is_file():
+            if force:
+                # 强制删除：源文件已不存在，直接标记元数据
+                item["status"] = "trashed"; item["trashed_at"] = now(); item["updated_at"] = item["trashed_at"]
+                _save(items); return dict(item)
+            raise FileNotFoundError("原文件已不存在，未执行删除")
         _move_file_to_recycle_bin(source)
         item["status"] = "trashed"; item["trashed_at"] = now(); item["updated_at"] = item["trashed_at"]
         _save(items); return dict(item)
@@ -591,10 +596,11 @@ def batch_update(items_to_update: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return updated
 
 
-def batch_delete(item_ids: list[str]) -> int:
+def batch_delete(item_ids: list[str], force: bool = False) -> int:
     """批量移入 Windows 回收站。
     与单个删除保持一致：先安全移动原文件，再把元数据标记为 trashed。
-    单项失败会跳过，绝不永久删除。返回成功处理的条目数。"""
+    单项失败会跳过，绝不永久删除。
+    force=True 时跳过文件检查，直接标记元数据。返回成功处理的条目数。"""
     count = 0
     with _LOCK:
         all_items = _load()
@@ -606,6 +612,12 @@ def batch_delete(item_ids: list[str]) -> int:
                     continue
                 source = Path(item["path"])
                 if not source.is_file():
+                    if force:
+                        item["status"] = "trashed"
+                        item["trashed_at"] = now()
+                        item["updated_at"] = item["trashed_at"]
+                        count += 1
+                        changed = True
                     continue
                 _move_file_to_recycle_bin(source)
                 item["status"] = "trashed"
@@ -708,6 +720,7 @@ def import_image_gen_gallery(project: str = "生图图库", limit: int = 0) -> d
     if limit and limit > 0:
         rows = rows[:limit]
     imported: list[dict[str, Any]] = []
+    repaired: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     with _LOCK:
         items = _load()
@@ -717,8 +730,6 @@ def import_image_gen_gallery(project: str = "生图图库", limit: int = 0) -> d
         for row in rows:
             source_id = str(row.get("id"))
             source_path = Path(row.get("file_path") or "")
-            if ("qwenpaw-image-gen", source_id) in existing_sources or str(source_path).lower() in existing_paths:
-                skipped.append({"id": source_id, "reason": "已存在"}); continue
             if not source_path.is_file():
                 skipped.append({"id": source_id, "reason": "原图不存在"}); continue
             meta = {
@@ -726,11 +737,32 @@ def import_image_gen_gallery(project: str = "生图图库", limit: int = 0) -> d
                 "negative_prompt": row.get("negative_prompt") or "",
                 "model_name": row.get("model_name") or "",
                 "lora_name": row.get("lora_name") or "",
+                # 分类由生图助手单向管理；产物库只同步、检索和展示，不反向修改。
+                "category": clean_text(row.get("category") or "未分类", 120, "生图分类") or "未分类",
                 "rating": int(row.get("rating") or 0),
                 "steps": row.get("steps"), "cfg": row.get("cfg"), "seed": row.get("seed"),
                 "width": row.get("width"), "height": row.get("height"),
                 "generated_at": row.get("generated_at") or row.get("created_at") or "",
             }
+            # 生图助手升级后，旧缓存目录可能会被清理，但图库记录的 source_id 不变。
+            # 若同一 source_id 的产物库记录已失效，原地修复它，而不是留下重复/无源记录。
+            existing = next((x for x in items if x.get("source_plugin") == "qwenpaw-image-gen" and str(x.get("source_id")) == source_id and x.get("status") != "trashed"), None)
+            if existing:
+                old_path = Path(existing.get("path") or "")
+                update_payload = {"title": _image_title(row), "summary": (row.get("prompt") or "生图助手生成图片")[:1000],
+                    "tags": _image_tags(row), "notes": clean_text(row.get("notes") or "", 2000, "备注"),
+                    "generation_meta": meta, "updated_at": timestamp}
+                if old_path.is_file() and str(old_path).lower() == str(source_path).lower():
+                    # 路径健康时也要同步分类、评分和生成参数的后续变化。
+                    if any(existing.get(k) != v for k, v in update_payload.items() if k != "updated_at"):
+                        existing.update(update_payload); repaired.append(dict(existing))
+                    else:
+                        skipped.append({"id": source_id, "reason": "已存在"})
+                    continue
+                existing.update({**file_meta(source_path), **update_payload})
+                repaired.append(dict(existing)); existing_paths.add(str(source_path).lower()); continue
+            if str(source_path).lower() in existing_paths:
+                skipped.append({"id": source_id, "reason": "文件已存在"}); continue
             item = {"id":"art_" + uuid.uuid4().hex[:12], **file_meta(source_path),
                     "title": _image_title(row),
                     "summary": (row.get("prompt") or "生图助手生成图片")[:1000],
@@ -742,13 +774,13 @@ def import_image_gen_gallery(project: str = "生图图库", limit: int = 0) -> d
                     "created_at": timestamp, "updated_at": timestamp, "trashed_at": None,
                     "asset_category": "generated_image", "source_plugin": "qwenpaw-image-gen",
                     "source_id": source_id, "generation_meta": meta}
-            items.append(item); imported.append(dict(item))
-        if imported:
+            items.append(item); imported.append(dict(item)); existing_paths.add(str(source_path).lower())
+        if imported or repaired:
             _save(items)
-    return {"imported": len(imported), "skipped": len(skipped), "items": imported, "skipped_items": skipped, "db_path": str(db)}
+    return {"imported": len(imported), "repaired": len(repaired), "skipped": len(skipped), "items": imported, "repaired_items": repaired, "skipped_items": skipped, "db_path": str(db)}
 
 
-def list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", min_rating: int = 0, sort: str = "newest") -> list[dict[str, Any]]:
+def list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", category: str = "", min_rating: int = 0, sort: str = "newest") -> list[dict[str, Any]]:
     query = (query or "").strip().lower()
     with _LOCK:
         rows = [dict(x) for x in _load() if x.get("asset_category") == "generated_image" and x.get("status") != "trashed"]
@@ -757,6 +789,7 @@ def list_generated_images(query: str = "", model_name: str = "", lora_name: str 
         meta = item.get("generation_meta") if isinstance(item.get("generation_meta"), dict) else {}
         if model_name and meta.get("model_name") != model_name: continue
         if lora_name and meta.get("lora_name") != lora_name: continue
+        if category and (meta.get("category") or "未分类") != category: continue
         if min_rating and int(meta.get("rating") or 0) < min_rating: continue
         hay = " ".join([item.get("title", ""), item.get("summary", ""), item.get("notes", ""), meta.get("prompt", ""), meta.get("negative_prompt", ""), meta.get("model_name", ""), meta.get("lora_name", "")]).lower()
         if query and query not in hay: continue
@@ -773,13 +806,14 @@ def list_generated_images(query: str = "", model_name: str = "", lora_name: str 
 
 def generated_image_facets() -> dict[str, Any]:
     rows = list_generated_images()
-    models: dict[str, int] = {}; loras: dict[str, int] = {}; ratings: dict[str, int] = {}
+    models: dict[str, int] = {}; loras: dict[str, int] = {}; categories: dict[str, int] = {}; ratings: dict[str, int] = {}
     for item in rows:
         meta = item.get("generation_meta") or {}
         m = meta.get("model_name") or "未记录模型"; models[m] = models.get(m, 0) + 1
         l = meta.get("lora_name") or "未使用/未记录 LoRA"; loras[l] = loras.get(l, 0) + 1
+        c = meta.get("category") or "未分类"; categories[c] = categories.get(c, 0) + 1
         r = str(int(meta.get("rating") or 0)); ratings[r] = ratings.get(r, 0) + 1
-    return {"total": len(rows), "models": models, "loras": loras, "ratings": ratings}
+    return {"total": len(rows), "models": models, "loras": loras, "categories": categories, "ratings": ratings}
 
 
 def send_generated_image_to_image_gen(artifact_id: str, api_url: str | None = None) -> dict[str, Any]:
