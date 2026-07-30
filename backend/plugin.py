@@ -2,6 +2,7 @@
 """QwenPaw Artifact Library — backend routes and agent registration tool."""
 from __future__ import annotations
 import json
+import io
 import sys
 from pathlib import Path
 from typing import Any, Optional
@@ -9,10 +10,10 @@ from typing import Any, Optional
 PLUGIN_DIR = Path(__file__).resolve().parent
 if str(PLUGIN_DIR) not in sys.path: sys.path.insert(0, str(PLUGIN_DIR))
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from qwenpaw.plugins.api import PluginApi
-from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, send_generated_image_to_image_gen)
+from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, )
 
 def _runtime_version() -> str:
     """Read the installed manifest at runtime; never trust a frontend hard-coded version alone."""
@@ -109,8 +110,28 @@ def api_copy_path(artifact_id:str):
     except Exception as exc: raise _http_error(exc) from exc
 @router.get("/artifacts/{artifact_id}/thumbnail")
 def api_thumbnail(artifact_id:str):
-    try: return FileResponse(thumbnail_path(artifact_id),media_type="image/jpeg",headers={"Cache-Control":"private, max-age=86400"})
-    except Exception as exc: raise _http_error(exc) from exc
+    # 缩略图直接返回原图的小尺寸版本，不做独立缓存，保证与详情图100%一致。
+    try:
+        item=get_artifact(artifact_id)
+        if item.get("artifact_type")!="image": raise ValueError("该产物不是图片")
+        path=Path(item["path"])
+        if not path.is_file(): raise FileNotFoundError("原文件已不存在")
+        # 用 PIL 等比缩放到 480px 宽输出 JPEG，每次实时生成
+        from PIL import Image, ImageOps
+        with Image.open(path) as im:
+            im = ImageOps.exif_transpose(im)
+            im.thumbnail((480, 480), Image.Resampling.LANCZOS)
+            if im.mode not in ("RGB", "L"): im = im.convert("RGB")
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=80, optimize=True)
+            buf.seek(0)
+        return Response(content=buf.read(), media_type="image/jpeg",
+            headers={"Cache-Control":"no-cache, no-store, must-revalidate", "Pragma":"no-cache", "Expires":"0"})
+    except Exception as exc:
+        from fastapi.responses import JSONResponse
+        if isinstance(exc, (FileNotFoundError, KeyError)): raise HTTPException(status_code=404, detail=str(exc))
+        if isinstance(exc, ValueError): raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=500, detail=f"缩略图生成失败：{exc}")
 @router.get("/artifacts/{artifact_id}/image")
 def api_image(artifact_id:str):
     try:
@@ -118,7 +139,7 @@ def api_image(artifact_id:str):
         if item.get("artifact_type")!="image": raise ValueError("该产物不是图片")
         path=Path(item["path"])
         if not path.is_file(): raise FileNotFoundError("原文件已不存在")
-        return FileResponse(path,media_type=item.get("mime_type") or "application/octet-stream",headers={"Cache-Control":"private, max-age=3600"})
+        return FileResponse(path,media_type=item.get("mime_type") or "application/octet-stream",headers={"Cache-Control":"no-cache, no-store, must-revalidate", "Pragma":"no-cache", "Expires":"0"})
     except Exception as exc: raise _http_error(exc) from exc
 @router.get("/artifacts/{artifact_id}/text")
 def api_text(artifact_id:str):
@@ -177,11 +198,6 @@ def api_import_generated_images(payload: ImportImageGenPayload):
 @router.get("/generated-images")
 def api_list_generated_images(query: str = "", model_name: str = "", lora_name: str = "", category: str = "", min_rating: int = 0, sort: str = "newest"):
     try: return {"items": list_generated_images(query, model_name, lora_name, category, min_rating, sort), "facets": generated_image_facets()}
-    except Exception as exc: raise _http_error(exc) from exc
-
-@router.post("/generated-images/{artifact_id}/send-to-image-gen")
-def api_send_generated_to_image_gen(artifact_id: str):
-    try: return send_generated_image_to_image_gen(artifact_id)
     except Exception as exc: raise _http_error(exc) from exc
 
 # ── Agent 工具函数 ──────────────────────────────────────────────────────────

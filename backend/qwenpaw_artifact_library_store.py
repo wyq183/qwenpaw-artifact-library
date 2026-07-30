@@ -18,7 +18,6 @@ import uuid
 import wave
 from pathlib import Path
 from typing import Any
-import requests
 
 DATA_ROOT = Path(os.environ.get("APPDATA", str(Path.home() / ".qwenpaw"))) / "QwenPaw" / "artifact-library"
 DATA_FILE = DATA_ROOT / "artifacts.json"
@@ -301,10 +300,26 @@ def _artifact_path(artifact_id: str, expected_type: str | None = None) -> tuple[
 def thumbnail_path(artifact_id: str) -> Path:
     item, source = _artifact_path(artifact_id, "image")
     if source.stat().st_size > 80 * 1024 * 1024: raise ValueError("图片超过 80MB，为保护性能不生成缩略图")
-    stamp = f"{source.stat().st_mtime_ns}-{source.stat().st_size}"
-    key = hashlib.sha256((str(source).lower()+stamp).encode("utf-8")).hexdigest()
+    # 读取一次文件信息，避免多次 stat 竞态
+    st = source.stat()
+    thumb_ts = st.st_mtime_ns
+    thumb_size = st.st_size
+    stamp = f"{thumb_ts}-{thumb_size}"
+    # 把 artifact 的 id 也加入 cache key，确保不同记录即使指向同名文件也不会串图。
+    key = hashlib.sha256((str(source).lower()+stamp+artifact_id).encode("utf-8")).hexdigest()
     output = THUMB_DIR / (key + ".jpg")
-    if output.exists(): return output
+    if output.exists():
+        # cache hit：检查缓存生成时间，超过 72 小时则重新生成以确保源文件变动后显示最新。
+        cache_age = time.time() - output.stat().st_mtime
+        if cache_age < 259200:
+            return output
+        # 缓存超期：fall through 重建
+    # 清理旧缓存：删除所有非当前 key 的缓存文件，防止串图
+    if THUMB_DIR.is_dir():
+        for old in THUMB_DIR.glob("*.jpg"):
+            if old.name != output.name:
+                try: old.unlink()
+                except Exception: pass
     try:
         from PIL import Image, ImageOps
         with Image.open(source) as im:
@@ -795,12 +810,35 @@ def list_generated_images(query: str = "", model_name: str = "", lora_name: str 
         if query and query not in hay: continue
         item["file_exists"] = Path(item["path"]).is_file()
         result.append(item)
+    def _generated_timestamp(item: dict[str, Any]) -> float:
+        """Use the image-generator creation time, not Artifact Library import time."""
+        meta = item.get("generation_meta") if isinstance(item.get("generation_meta"), dict) else {}
+        value = meta.get("generated_at") or meta.get("created_at") or item.get("file_modified_at") or item.get("created_at") or 0
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if not text:
+            return 0.0
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+            try:
+                return datetime.datetime.strptime(text[:19], fmt).timestamp()
+            except ValueError:
+                pass
+        try:
+            return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+
     if sort == "rating":
-        result.sort(key=lambda x: (int((x.get("generation_meta") or {}).get("rating") or 0), x.get("created_at", 0)), reverse=True)
+        result.sort(key=lambda x: (int((x.get("generation_meta") or {}).get("rating") or 0), _generated_timestamp(x)), reverse=True)
     elif sort == "model":
-        result.sort(key=lambda x: ((x.get("generation_meta") or {}).get("model_name") or "", -x.get("created_at", 0)))
+        result.sort(key=lambda x: ((x.get("generation_meta") or {}).get("model_name") or "", -_generated_timestamp(x)))
+    elif sort == "oldest":
+        result.sort(key=_generated_timestamp)
+    elif sort == "size":
+        result.sort(key=lambda x: (int(x.get("size_bytes") or 0), _generated_timestamp(x)), reverse=True)
     else:
-        result.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+        result.sort(key=_generated_timestamp, reverse=True)
     return result
 
 
@@ -816,38 +854,6 @@ def generated_image_facets() -> dict[str, Any]:
     return {"total": len(rows), "models": models, "loras": loras, "categories": categories, "ratings": ratings}
 
 
-def send_generated_image_to_image_gen(artifact_id: str, api_url: str | None = None) -> dict[str, Any]:
-    """Best-effort forward a generated-image artifact back to image-gen as a draft."""
-    item = get_artifact(artifact_id)
-    if item.get("asset_category") != "generated_image":
-        raise ValueError("该产物不是生图资产")
-    meta = item.get("generation_meta") if isinstance(item.get("generation_meta"), dict) else {}
-    api_root = (api_url or os.environ.get("QWENPAW_IMAGE_GEN_API_URL") or "http://127.0.0.1:14999").rstrip("/")
-    payload = {
-        "artifact_id": artifact_id,
-        "prompt": meta.get("prompt") or item.get("summary") or "",
-        "negative_prompt": meta.get("negative_prompt") or "",
-        "model_name": meta.get("model_name") or "",
-        "lora_name": meta.get("lora_name") or "",
-        "loras": meta.get("loras") or [],
-        "steps": meta.get("steps") or 20,
-        "cfg": meta.get("cfg") or 7.0,
-        "seed": meta.get("seed") or -1,
-        "width": meta.get("width") or 1024,
-        "height": meta.get("height") or 1024,
-        "workflow_json": meta.get("workflow_json") or {},
-    }
-    endpoints = [
-        f"{api_root}/image-gen/recipe-draft",
-        f"{api_root}/image-gen/recipes/draft",
-    ]
-    last_error = None
-    for url in endpoints:
-        try:
-            r = requests.post(url, json=payload, timeout=10)
-            if r.status_code < 500:
-                data = r.json() if r.content else {}
-                return {"success": True, "endpoint": url, "response": data}
-        except Exception as exc:
-            last_error = str(exc)
-    return {"success": False, "error": last_error or "无法发送到生图助手"}
+def _removed_send_generated_image_to_image_gen() -> None:
+    """Deprecated placeholder: generated-image forwarding was removed in v0.5.1."""
+    raise NotImplementedError("生图资产不再支持发送回生图助手，请复制 Prompt 或参数摘要")

@@ -8,7 +8,7 @@
     Descriptions = antd.Descriptions, Space = antd.Space, message = antd.message,
     Spin = antd.Spin, Dropdown = antd.Dropdown, Card = antd.Card, Radio = antd.Radio, Rate = antd.Rate;
   var pluginId = "qwenpaw-artifact-library";
-  var PLUGIN_VERSION = "0.5.2";
+  var PLUGIN_VERSION = "0.5.1";
   var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
   var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
   var TYPE_COLOR = { image:"magenta", document:"blue", web:"cyan", code:"purple", video:"volcano", audio:"gold", archive:"orange", data:"geekblue", other:"default" };
@@ -45,7 +45,7 @@
     var item = p.item, st = React.useState(null), preview = st[0], setPreview = st[1], loading = React.useState(false), busy = loading[0], setBusy = loading[1];
     React.useEffect(function(){
       setPreview(null); if (!item || item.status === "trashed") return;
-      if (item.artifact_type === "image") { setPreview({kind:"image", url:"/api/artifact-library/artifacts/" + item.id + "/image?_=" + Date.now()}); return; }
+      if (item.artifact_type === "image") { setPreview({kind:"image", url:"/api/artifact-library/artifacts/" + item.id + "/image"}); return; }
       if (item.artifact_type === "audio" || item.artifact_type === "video") { setBusy(true); request("/artifacts/" + item.id + "/media").then(function(d){setPreview({kind:"media", data:d});}).catch(function(e){setPreview({kind:"error", text:e.message});}).finally(function(){setBusy(false);}); return; }
       if (TEXT_TYPES[item.artifact_type]) { setBusy(true); request("/artifacts/" + item.id + "/text").then(function(d){setPreview({kind:"text", data:d});}).catch(function(e){setPreview({kind:"error", text:e.message});}).finally(function(){setBusy(false);}); }
     }, [item && item.id]);
@@ -121,7 +121,7 @@
       { title:"类型", dataIndex:"artifact_type", width:105, render:function(v){return h(TypeTag,{type:v});}}, { title:"状态", dataIndex:"status", width:115, render:function(v){return h(StatusTag,{status:v});}},
       { title:"登记时间", dataIndex:"created_at", width:170, render:function(v){return h("span",{style:{fontSize:12,color:"#595959"}},fmtTime(v));}}, { title:"操作", key:"actions", width:310, render:function(_,x){return actionButtons(x);}}
     ];
-    var renderCards = function(){ return h("div", {style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:14}}, items.map(function(x){ return h(Card, {key:x.id, hoverable:true, onDoubleClick:function(){openDetail(x);}, cover:x.artifact_type==="image"?h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail?_="+Date.now(), style:{height:150,objectFit:"cover"}, onError:function(e){e.currentTarget.style.display='none';}}):null}, h("div",{style:{display:"flex",gap:8,alignItems:"center",marginBottom:8}}, h("b",{style:{fontSize:18,color:"#1677ff"}},fileIcon(x.artifact_type)), h("b",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.title)), h("div",{style:{fontSize:12,color:"#8c8c8c",height:36,overflow:"hidden"}},x.summary), h("div",{style:{marginTop:10}}, h(TypeTag,{type:x.artifact_type}), h(StatusTag,{status:x.status})), h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:8}},x.project), h("div",{style:{marginTop:10}}, actionButtons(x))); })); };
+    var renderCards = function(){ return h("div", {style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(250px,1fr))",gap:14}}, items.map(function(x){ return h(Card, {key:x.id, hoverable:true, onDoubleClick:function(){openDetail(x);}, cover:x.artifact_type==="image"?h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail", style:{height:150,objectFit:"cover"}, onError:function(e){e.currentTarget.style.display='none';}}):null}, h("div",{style:{display:"flex",gap:8,alignItems:"center",marginBottom:8}}, h("b",{style:{fontSize:18,color:"#1677ff"}},fileIcon(x.artifact_type)), h("b",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},x.title)), h("div",{style:{fontSize:12,color:"#8c8c8c",height:36,overflow:"hidden"}},x.summary), h("div",{style:{marginTop:10}}, h(TypeTag,{type:x.artifact_type}), h(StatusTag,{status:x.status})), h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:8}},x.project), h("div",{style:{marginTop:10}}, actionButtons(x))); })); };
     var renderProjects = function(){ var grouped={}; items.forEach(function(x){(grouped[x.project||"未分类"]||(grouped[x.project||"未分类"]=[])).push(x);}); return h("div", null, Object.keys(grouped).sort().map(function(k){return h("div",{key:k,style:{marginBottom:18}}, h("h3",{style:{margin:"8px 0"}},k+" · "+grouped[k].length+" 项"), h(Table,{dataSource:grouped[k],rowKey:"id",columns:columns,pagination:false,size:"small",onRow:function(x){return {onDoubleClick:function(){openDetail(x);},style:{cursor:"pointer"}};}}));})); };
     var renderGenerated = function(){ return h("div", null,
       h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14,padding:"10px 12px",background:"#fff7e6",border:"1px solid #ffd591",borderRadius:8}},
@@ -133,7 +133,7 @@
         h(Select,{value:genSort,onChange:setGenSort,options:[{label:"最新",value:"newest"},{label:"星级优先",value:"rating"},{label:"按模型",value:"model"}],style:{width:120}}),
         h("span",{style:{flex:1}}), h(Button,{type:"primary",onClick:importGenerated},"从生图助手导入"), h(Button,{onClick:loadGenerated},"刷新")
       ),
-      genItems.length ? h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}, genItems.map(function(x){ var m=GenMeta(x); return h(Card,{key:x.id,hoverable:true,onDoubleClick:function(){openDetail(x);},cover:h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail?_="+Date.now(),style:{height:190,objectFit:"cover"},onError:function(e){e.currentTarget.style.display='none';}})},
+      genItems.length ? h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}, genItems.map(function(x){ var m=GenMeta(x); return h(Card,{key:x.id,hoverable:true,onDoubleClick:function(){openDetail(x);},cover:h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail",style:{height:190,objectFit:"cover"},onError:function(e){e.currentTarget.style.display='none';}})},
         h("div",{style:{fontWeight:700,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},x.title),
         h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:5}},(m.width||"?")+"×"+(m.height||"?")+" · Seed "+(m.seed==null?"—":m.seed)),
         h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:4}},"模型："+shortName(m.model_name||"未记录")),
