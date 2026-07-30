@@ -40,9 +40,9 @@ try:
     );
     """)
     conn.execute("INSERT INTO gallery_images(file_path,file_name,file_size,width,height,prompt,negative_prompt,model_name,lora_name,workflow_id,steps,cfg,seed,rating,notes,deleted,created_at,generated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                 (str(img1), "img1.png", img1.stat().st_size, 768, 768, "blue girl", "bad hands", "waiIllustriousSDXL_v170.safetensors", "luotianyi.safetensors", 1, 28, 6.5, 12345, 5, "好图", 0, "2026-07-28 10:00:00", "2026-07-28 10:00:00"))
+                 (str(img1), "img1.png", img1.stat().st_size, 768, 768, "blue girl", "bad hands", "example-model-v1.safetensors", "example-lora-v1.safetensors", 1, 28, 6.5, 12345, 5, "好图", 0, "2026-07-28 10:00:00", "2026-07-28 10:00:00"))
     conn.execute("INSERT INTO gallery_images(file_path,file_name,file_size,width,height,prompt,negative_prompt,model_name,lora_name,workflow_id,steps,cfg,seed,rating,notes,deleted,created_at,generated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                 (str(img2), "img2.png", img2.stat().st_size, 1024, 1024, "red city", "", "JuggernautXL_Ragnarok_ByRunDiffusion.safetensors", "", 1, 20, 7.0, 222, 3, "", 0, "2026-07-28 11:00:00", "2026-07-28 11:00:00"))
+                 (str(img2), "img2.png", img2.stat().st_size, 1024, 1024, "red city", "", "example-model-v2.safetensors", "", 1, 20, 7.0, 222, 3, "", 0, "2026-07-28 11:00:00", "2026-07-28 11:00:00"))
     conn.commit(); conn.close()
 
     st = image_gen_source_status()
@@ -56,10 +56,10 @@ try:
     assert all(x["asset_category"] == "generated_image" for x in all_imgs)
     five = list_generated_images(min_rating=5)
     assert len(five) == 1 and five[0]["generation_meta"]["rating"] == 5, five
-    wai = list_generated_images(model_name="waiIllustriousSDXL_v170.safetensors")
+    wai = list_generated_images(model_name="example-model-v1.safetensors")
     assert len(wai) == 1 and "blue girl" in wai[0]["generation_meta"]["prompt"], wai
     facets = generated_image_facets()
-    assert facets["total"] == 2 and facets["models"]["waiIllustriousSDXL_v170.safetensors"] == 1, facets
+    assert facets["total"] == 2 and facets["models"]["example-model-v1.safetensors"] == 1, facets
     updated = patch_artifact(five[0]["id"], {"notes":"更新备注", "generation_meta": {**five[0]["generation_meta"], "rating": 4}})
     assert updated["notes"] == "更新备注" and updated["generation_meta"]["rating"] == 4, updated
     print("v0.4.0 generated image tests passed")

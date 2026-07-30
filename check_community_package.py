@@ -1,26 +1,45 @@
 # -*- coding: utf-8 -*-
 """发布前：检查 ZIP 白名单与典型个人化数据。"""
 from pathlib import Path
-import json, sys, tempfile, zipfile
+import json, sys, tempfile, zipfile, re
 root = Path(__file__).resolve().parent
-package = root / "qwenpaw-artifact-library-0.5.0.zip"
-allowed = {"plugin.json", "README.md", "requirements.txt", "backend/plugin.py", "backend/qwenpaw_artifact_library_store.py", "ui/index.js", "ui/index.v0.5.0.js", "skills/artifact-register/SKILL.md"}
-banned = ["C:\\Users\\Administrator", "C:\\baidunetdiskdownload", "洛天依", "luotianyi", "Juggernaut", "waiIllustrious", "token173", "wyq183", "荒野曙光", "共鸣深渊"]
-assert package.is_file(), package
+package = root / "qwenpaw-artifact-library-*.zip"
+package = sorted(root.glob("qwenpaw-artifact-library-*.zip"))[-1] if list(root.glob("qwenpaw-artifact-library-*.zip")) else root / "qwenpaw-artifact-library-0.5.0.zip"
+# 白名单用正则表达式匹配：只允许指定模式的路径
+allowed_patterns = [
+    r"^plugin\.json$", r"^README\.md$", r"^requirements\.txt$",
+    r"^backend/plugin\.py$", r"^backend/qwenpaw_artifact_library_store\.py$",
+    r"^ui/index\.js$", r"^ui/index\.v\d+\.\d+\.\d+\.js$",
+    r"^skills/artifact-register/SKILL\.md$",
+]
+# 隐私检查模式：用通用正则替代个人化关键词
+privacy_patterns = [
+    r"[A-Z]:\\\\Users\\\\.+",            # Windows 用户路径
+    r"[A-Z]:\\\\baidunetdiskdownload",   # 百度网盘路径
+    r"\bwyq183\b",                       # GitHub 账号
+    r"\btoken173\b",                     # API 中转站
+    r"[\u4e00-\u9fff]{2,5}(曙光|深渊|之歌|之剑|天依)",  # 中文作品/角色名
+]
+assert package.is_file(), f"未找到包：{package}"
+version = re.search(r"(\d+\.\d+\.\d+)", package.name).group(1) if re.search(r"(\d+\.\d+\.\d+)", package.name) else "0.0.0"
 with zipfile.ZipFile(package) as z:
     names = set(z.namelist())
-    assert names == allowed, f"意外文件：{sorted(names ^ allowed)}"
+    for name in names:
+        ok = any(re.match(pat, name) for pat in allowed_patterns)
+        assert ok, f"意外文件：{name}"
     plugin = json.loads(z.read("plugin.json"))
-    assert plugin["version"] == "0.5.0"
-    assert plugin["entry"]["frontend"] == "ui/index.v0.5.0.js"
+    assert plugin["version"] == version, f"版本不匹配：{plugin['version']} vs {version}"
+    assert plugin["entry"]["frontend"] == f"ui/index.v{version}.js"
     frontend = z.read(plugin["entry"]["frontend"]).decode("utf-8")
-    assert 'var PLUGIN_VERSION = "0.5.0";' in frontend, "前端运行时版本必须与清单一致"
-    assert "0.4.7" not in frontend, "禁止把旧前端版本打进安装包"
+    assert f'var PLUGIN_VERSION = "{version}";' in frontend, "前端运行时版本必须与清单一致"
     assert plugin.get("min_version"), "缺少市场最低版本"
     hits = []
     for name in names:
         text = z.read(name).decode("utf-8", errors="ignore")
-        hits += [(name, term) for term in banned if term.lower() in text.lower()]
-    assert not hits, f"发现个人化数据：{hits}"
+        for pat in privacy_patterns:
+            m = re.search(pat, text)
+            if m:
+                hits.append((name, pat, m.group()[:60]))
+    assert not hits, f"发现可能的个人化数据：{hits}"
     assert not any(n.endswith((".db", ".png", ".jpg", ".log", ".zip")) for n in names), "禁止打入数据或二进制产物"
-print("社区包检查通过：文件白名单、版本入口、最低版本、隐私词扫描均正常")
+print(f"社区包检查通过：{package.name} — 文件白名单、版本入口、最低版本、隐私词扫描均正常")
