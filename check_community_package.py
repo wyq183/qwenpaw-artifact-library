@@ -4,7 +4,11 @@ from pathlib import Path
 import json, sys, tempfile, zipfile, re
 root = Path(__file__).resolve().parent
 package = root / "qwenpaw-artifact-library-*.zip"
-package = sorted(root.glob("qwenpaw-artifact-library-*.zip"))[-1] if list(root.glob("qwenpaw-artifact-library-*.zip")) else root / "qwenpaw-artifact-library-0.5.0.zip"
+def _ver_key(p):
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", p.name)
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
+zips = list(root.glob("qwenpaw-artifact-library-*.zip"))
+package = max(zips, key=_ver_key) if zips else root / "qwenpaw-artifact-library-0.5.0.zip"
 # 白名单用正则表达式匹配：只允许指定模式的路径
 allowed_patterns = [
     r"^plugin\.json$", r"^README\.md$", r"^requirements\.txt$",
