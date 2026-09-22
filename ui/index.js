@@ -8,7 +8,7 @@
     Descriptions = antd.Descriptions, Space = antd.Space, message = antd.message,
     Spin = antd.Spin, Dropdown = antd.Dropdown, Card = antd.Card, Radio = antd.Radio, Rate = antd.Rate;
   var pluginId = "qwenpaw-artifact-library";
-  var PLUGIN_VERSION = "0.5.4";
+  var PLUGIN_VERSION = "0.5.5";
   var TYPES = { image: "图片", document: "文档", web: "网页", code: "代码", video: "视频", audio: "音频", archive: "压缩包", data: "数据", other: "其他" };
   var STATUS = { draft: "草稿", delivered: "已交付", final: "最终版", archived: "已归档", trashed: "已移入回收站" };
   var TYPE_COLOR = { image:"magenta", document:"blue", web:"cyan", code:"purple", video:"volcano", audio:"gold", archive:"orange", data:"geekblue", other:"default" };
@@ -78,6 +78,7 @@
     var genCategoryState = React.useState(""), genCategory = genCategoryState[0], setGenCategory = genCategoryState[1];
     var genRatingState = React.useState(0), genRating = genRatingState[0], setGenRating = genRatingState[1];
     var genSortState = React.useState("newest"), genSort = genSortState[0], setGenSort = genSortState[1];
+    var hideMissingState = React.useState(false), hideMissing = hideMissingState[0], setHideMissing = hideMissingState[1];
     var runtimeState = React.useState("checking"), runtimeStatus = runtimeState[0], setRuntimeStatus = runtimeState[1];
 
     React.useEffect(function(){
@@ -111,6 +112,10 @@
     var doBatchUpdate = function(field){ var val=prompt("新的"+(field==="project"?"项目名":"类型")); if(!val)return; post("/batch",{items:selectedRowKeys.map(function(id){var o={id:id};o[field]=val;return o;})}).then(function(d){message.success("已更新 "+d.updated+" 项");setSelectedRowKeys([]);softRefresh();}).catch(function(e){message.error(e.message);}); };
     var doBatchDelete = function(){ Modal.confirm({title:"批量移入回收站",content:"确定将选中的 "+selectedRowKeys.length+" 项移入 Windows 回收站？不会永久删除。",okText:"移入回收站",okButtonProps:{danger:true},cancelText:"取消",onOk:function(){return post("/batch/delete",{ids:selectedRowKeys}).then(function(d){message.success("已移入回收站 "+d.deleted+" 项");setSelectedRowKeys([]);softRefresh();});}}); };
     var orphanCount = items.filter(function(x){return x.file_exists===false && x.status!=="trashed";}).length;
+    var genOrphanCount = genItems.filter(function(x){return x.file_exists===false;}).length;
+    var visibleGenItems = hideMissing ? genItems.filter(function(x){return x.file_exists!==false;}) : genItems;
+    var resyncGenerated = function(){ var proj = prompt("同步修复到哪个项目？", "生图图库"); if (!proj) return; post("/generated-images/import", {project:proj, limit:0}).then(function(d){ message.success("同步完成：修复 " + (d.repaired||0) + " 张，导入 " + d.imported + " 张，跳过 " + d.skipped + " 张"); loadGenerated(); }).catch(function(e){ message.error(e.message); }); };
+    var cleanupGenOrphans = function(){ Modal.confirm({title:"清理失效生图记录",content:"将清理全部 "+genOrphanCount+" 条原文件已不存在的生图记录（只标记回收站，不动磁盘文件）。若图片只是换了位置，建议先点「同步修复路径」。确定继续？",okText:"清理",okButtonProps:{danger:true},cancelText:"取消",onOk:function(){return post("/generated-images/cleanup-missing",{}).then(function(d){message.success("已清理 "+d.cleaned+" 条失效记录");loadGenerated();});}}); };
     var cleanupOrphans = function(){ Modal.confirm({title:"清理无源文件记录",content:"将删除 "+orphanCount+" 条源文件已不存在的记录（元数据标记为回收站，文件已不存在无需回收）。确定继续？",okText:"清理",okButtonProps:{danger:true},cancelText:"保留",onOk:function(){return post("/batch/delete",{ids:items.filter(function(x){return x.file_exists===false && x.status!=="trashed";}).map(function(x){return x.id;}), force:true}).then(function(d){message.success("已清理 "+d.deleted+" 条无源记录");softRefresh();});}}); };
     var rowSelection = { selectedRowKeys: selectedRowKeys, onChange: function(keys){ setSelectedRowKeys(keys); } };
     var actionButtons = function(x) { return h(Space,{size:2,wrap:true}, x.file_exists===false?h("span",{style:{color:"#faad14",fontSize:16,marginRight:4}},"⚠"):null, h(Button,{type:"link",size:"small",onClick:function(){openDetail(x);}},"详情"), x.status!=="trashed"?h(Button,{type:"link",size:"small",onClick:function(){reveal(x);}},"打开位置"):null, x.status!=="trashed"?h(Button,{type:"link",size:"small",onClick:function(){copyArtifact(x);}},"复制产物"):null, h(Button,{type:"link",size:"small",onClick:function(){copyPath(x);}},"复制路径"), x.status!=="trashed"&&x.status!=="final"?h(Button,{type:"link",size:"small",onClick:function(){markFinal(x).catch(function(e){message.error(e.message);});}},"设终版"):null, x.status!=="trashed"?h(Button,{type:"link",danger:true,size:"small",onClick:function(){trash(x);}},"删除"):null); };
@@ -125,29 +130,35 @@
     var renderProjects = function(){ var grouped={}; items.forEach(function(x){(grouped[x.project||"未分类"]||(grouped[x.project||"未分类"]=[])).push(x);}); return h("div", null, Object.keys(grouped).sort().map(function(k){return h("div",{key:k,style:{marginBottom:18}}, h("h3",{style:{margin:"8px 0"}},k+" · "+grouped[k].length+" 项"), h(Table,{dataSource:grouped[k],rowKey:"id",columns:columns,pagination:false,size:"small",onRow:function(x){return {onDoubleClick:function(){openDetail(x);},style:{cursor:"pointer"}};}}));})); };
     var renderGenerated = function(){ return h("div", null,
       h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:14,padding:"10px 12px",background:"#fff7e6",border:"1px solid #ffd591",borderRadius:8}},
-        h("b",null,"生图资产 · "+(facets.total||genItems.length)+" 张"),
+        h("b",null,"生图资产 · "+(facets.total||genItems.length)+" 张"+(genOrphanCount>0?"（失效 "+genOrphanCount+"）":"")),
         h(Select,{allowClear:true,value:genModel||undefined,onChange:function(v){setGenModel(v||"");},placeholder:"按模型",options:Object.keys(facets.models||{}).map(function(k){return {label:shortName(k)+" · "+facets.models[k],value:k};}),style:{width:220}}),
         h(Select,{allowClear:true,value:genLora||undefined,onChange:function(v){setGenLora(v||"");},placeholder:"按 LoRA",options:Object.keys(facets.loras||{}).map(function(k){return {label:shortName(k)+" · "+facets.loras[k],value:k};}),style:{width:220}}),
         h(Select,{allowClear:true,value:genCategory||undefined,onChange:function(v){setGenCategory(v||"");},placeholder:"生图分类",options:Object.keys(facets.categories||{}).sort().map(function(k){return {label:k+" · "+facets.categories[k],value:k};}),style:{width:170}}),
         h(Select,{value:genRating,onChange:setGenRating,options:[0,1,2,3,4,5].map(function(n){return {label:n?"≥"+n+" 星":"全部星级",value:n};}),style:{width:120}}),
-        h(Select,{value:genSort,onChange:setGenSort,options:[{label:"最新",value:"newest"},{label:"星级优先",value:"rating"},{label:"按模型",value:"model"}],style:{width:120}}),
+        h(Select,{value:genSort,onChange:setGenSort,options:[{label:"最新生成",value:"newest"},{label:"最早生成",value:"oldest"},{label:"星级优先",value:"rating"},{label:"按模型",value:"model"},{label:"文件最大",value:"size"}],style:{width:130}}),
+        h(Button,{size:"small",type:hideMissing?"primary":"default",onClick:function(){setHideMissing(!hideMissing);}},hideMissing?"显示失效":"隐藏失效"),
         h("span",{style:{flex:1}}), h(Button,{type:"primary",onClick:importGenerated},"从生图助手导入"), h(Button,{onClick:loadGenerated},"刷新")
       ),
-      genItems.length ? h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}, genItems.map(function(x){ var m=GenMeta(x); return h(Card,{key:x.id,hoverable:true,onDoubleClick:function(){openDetail(x);},cover:h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail?_="+Date.now(),style:{height:190,objectFit:"cover"},onError:function(e){e.currentTarget.style.display='none';}})},
-        h("div",{style:{fontWeight:700,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}},x.title),
+      genOrphanCount>0?h("div",{style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginBottom:14,padding:"8px 12px",background:"#fffbe6",border:"1px solid #ffe58f",borderRadius:8}},
+        h("span",{style:{fontSize:13,color:"#ad6800"}},"⚠ "+genOrphanCount+" 条生图记录的原文件已不存在（生图助手迁移目录或文件被清理后常见）"),
+        h(Button,{size:"small",onClick:resyncGenerated},"同步修复路径"),
+        h(Button,{size:"small",danger:true,onClick:cleanupGenOrphans},"清理失效记录")
+      ):null,
+      visibleGenItems.length ? h("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}, visibleGenItems.map(function(x){ var m=GenMeta(x); return h(Card,{key:x.id,hoverable:true,onDoubleClick:function(){openDetail(x);},cover:h("img",{src:"/api/artifact-library/artifacts/"+x.id+"/thumbnail?_="+Date.now(),style:{height:190,objectFit:"cover",opacity:x.file_exists===false?0.45:1},onError:function(e){e.currentTarget.style.display='none';}})},
+        h("div",{style:{display:"flex",alignItems:"center",gap:6}}, h("div",{style:{fontWeight:700,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",flex:1}},x.title), x.file_exists===false?h(Tag,{color:"warning",style:{margin:0,flexShrink:0}},"文件丢失"):null),
         h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:5}},(m.width||"?")+"×"+(m.height||"?")+" · Seed "+(m.seed==null?"—":m.seed)),
         h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:4}},"模型："+shortName(m.model_name||"未记录")),
         h("div",{style:{fontSize:12,color:"#8c8c8c",marginTop:4}},"LoRA："+shortName(m.lora_name||"未记录")),
         h("div",{style:{fontSize:12,color:"#1677ff",marginTop:4}},"分类："+(m.category||"未分类")),
         h("div",{style:{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}, h(Rate,{disabled:true,value:Number(m.rating||0),style:{fontSize:14}}), h("div",{style:{display:"flex",gap:4}},h(Button,{size:"small",onClick:function(e){e.stopPropagation();copyText(m.prompt,"Prompt");}},"复制Prompt"),m.negative_prompt?h(Button,{size:"small",onClick:function(e){e.stopPropagation();copyText(m.negative_prompt,"Negative Prompt");}},"复制负向"):null)),
         h("div",{style:{marginTop:8}}, actionButtons(x))
-      ); })) : h(Empty,{description:"还没有导入生图资产。点击“从生图助手导入”会读取本机 qwenpaw-image-gen 图库。",image:Empty.PRESENTED_IMAGE_SIMPLE})
+      ); })) : h(Empty,{description:hideMissing&&genItems.length?"已隐藏全部失效记录，可点「显示失效」查看。":(genItems.length?"没有符合筛选条件的生图资产。":"还没有导入生图资产。点击“从生图助手导入”会读取本机 qwenpaw-image-gen 图库。"),image:Empty.PRESENTED_IMAGE_SIMPLE})
     ); };
 
     var body = busy?h("div",{style:{padding:70,textAlign:"center"}},h(Spin,null)):(view==="generated"?renderGenerated():items.length?(view==="cards"?renderCards():view==="projects"?renderProjects():h(Table,{rowSelection:rowSelection,dataSource:items,rowKey:"id",columns:columns,pagination:{pageSize:12,showSizeChanger:false},size:"middle",onRow:function(x){return {onDoubleClick:function(){openDetail(x);},style:{cursor:"pointer"}};} })):h(Empty,{description:"还没有登记的正式产物。Agent 交付文件后调用 register_artifact 即可收录。",image:Empty.PRESENTED_IMAGE_SIMPLE}));
 
     return h("div",{style:{height:"100%",minHeight:"100%",background:"var(--ant-color-bg-layout,#f5f5f5)",padding:"28px 32px",boxSizing:"border-box"}}, h("div",{style:{maxWidth:1500,margin:"0 auto"}},
-      h("header",{style:{display:"flex",alignItems:"end",justifyContent:"space-between",marginBottom:24}},h("div",null,h("div",{style:{fontSize:12,letterSpacing:".14em",fontWeight:700,color:"#1677ff",marginBottom:7}},"ARTIFACT LIBRARY"),h("h1",{style:{margin:0,fontSize:28,lineHeight:1.2,letterSpacing:"-.03em"}},"产物库"),h("div",{style:{color:"#8c8c8c",fontSize:13,marginTop:8}},"正式成果 + 生图资产管理 · "+(view==="generated"?genItems.length:items.length)+" 项"+(orphanCount>0?" · ⚠ "+orphanCount+" 条无源文件":""))),h("div",{style:{fontSize:12,color:"#8c8c8c",maxWidth:500,textAlign:"right",lineHeight:1.6}},"v" + PLUGIN_VERSION + "：已使用版本化前端入口，升级后可避开旧版界面缓存；生图资产、备注、星级与交付归档继续可用。")),
+      h("header",{style:{display:"flex",alignItems:"end",justifyContent:"space-between",marginBottom:24}},h("div",null,h("div",{style:{fontSize:12,letterSpacing:".14em",fontWeight:700,color:"#1677ff",marginBottom:7}},"ARTIFACT LIBRARY"),h("h1",{style:{margin:0,fontSize:28,lineHeight:1.2,letterSpacing:"-.03em"}},"产物库"),h("div",{style:{color:"#8c8c8c",fontSize:13,marginTop:8}},"正式成果 + 生图资产管理 · "+(view==="generated"?genItems.length:items.length)+" 项"+((view==="generated"?genOrphanCount:orphanCount)>0?" · ⚠ "+(view==="generated"?genOrphanCount:orphanCount)+" 条无源文件":""))),h("div",{style:{fontSize:12,color:"#8c8c8c",maxWidth:500,textAlign:"right",lineHeight:1.6}},"v" + PLUGIN_VERSION + "：已使用版本化前端入口，升级后可避开旧版界面缓存；生图资产、备注、星级与交付归档继续可用。")),
       runtimeStatus.indexOf("mismatch:")===0?h("div",{style:{marginBottom:14,padding:"10px 12px",borderRadius:8,background:"#fff2f0",border:"1px solid #ffccc7",color:"#cf1322",fontSize:13,lineHeight:1.6}},"版本不同步：当前界面是 v"+PLUGIN_VERSION+"，但运行中的产物库后端是 v"+runtimeStatus.slice(9)+"。已自动刷新一次仍未同步，请完全退出并重新打开 QwenPaw 后再使用，避免旧界面与新数据混用。 ",h(Button,{size:"small",danger:true,onClick:function(){sessionStorage.removeItem(pluginId+"-version-reload-"+PLUGIN_VERSION);window.location.reload();}},"再次检查")):runtimeStatus==="unavailable"?h("div",{style:{marginBottom:14,padding:"8px 12px",borderRadius:8,background:"#fffbe6",border:"1px solid #ffe58f",color:"#ad6800",fontSize:13}},"暂时无法确认运行版本；当前功能仍可使用。若刚升级插件，请重启 QwenPaw 后再确认版本。 ",h(Button,{size:"small",onClick:function(){window.location.reload();}},"重新检查")):null,
       h("section",{style:{background:"var(--ant-color-bg-container,#fff)",border:"1px solid var(--ant-color-border-secondary,#f0f0f0)",borderRadius:12,padding:16,boxShadow:"0 2px 12px rgba(0,0,0,.025)"}},
         h("div",{style:{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:16}},

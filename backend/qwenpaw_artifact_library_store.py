@@ -822,11 +822,13 @@ def list_generated_images(query: str = "", model_name: str = "", lora_name: str 
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y/%m/%d %H:%M:%S"):
             try:
                 return datetime.datetime.strptime(text[:19], fmt).timestamp()
-            except ValueError:
+            except (ValueError, OSError, OverflowError):
+                # Windows 上 1970 之前/超范围的时间戳会抛 OSError(Errno 22)，
+                # 不能让单条脏数据把整个生图资产列表接口打崩。
                 pass
         try:
             return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-        except ValueError:
+        except (ValueError, OSError, OverflowError):
             return 0.0
 
     if sort == "rating":
@@ -854,6 +856,24 @@ def generated_image_facets() -> dict[str, Any]:
     return {"total": len(rows), "models": models, "loras": loras, "categories": categories, "ratings": ratings}
 
 
-def _removed_send_generated_image_to_image_gen() -> None:
-    """Deprecated placeholder: generated-image forwarding was removed in v0.5.1."""
-    raise NotImplementedError("生图资产不再支持发送回生图助手，请复制 Prompt 或参数摘要")
+def cleanup_missing_generated_images() -> dict[str, Any]:
+    """Mark every generated-image record whose source file is gone as trashed.
+
+    Scope is the whole gallery, not the current filtered view, so a filtered
+    frontend list can never leave stale records behind. Disk files are never
+    touched: the original is already missing, only metadata moves to trash.
+    """
+    cleaned = 0
+    with _LOCK:
+        items = _load()
+        for item in items:
+            if item.get("asset_category") != "generated_image": continue
+            if item.get("status") == "trashed": continue
+            if Path(item.get("path") or "").is_file(): continue
+            item["status"] = "trashed"
+            item["trashed_at"] = now()
+            item["updated_at"] = item["trashed_at"]
+            cleaned += 1
+        if cleaned:
+            _save(items)
+    return {"cleaned": cleaned}

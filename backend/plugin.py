@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from qwenpaw.plugins.api import PluginApi
-from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, )
+from qwenpaw_artifact_library_store import (STATUS_LABELS, TYPE_LABELS, choose_file, cleanup_missing_generated_images, copy_artifact_path_to_clipboard, copy_artifact_to_clipboard, create_artifact, get_artifact, inspect_file, list_artifacts, media_info, move_to_trash, patch_artifact, reveal_in_folder, text_preview, thumbnail_path, get_stats, export_artifacts, batch_update, batch_delete, import_image_gen_gallery, list_generated_images, generated_image_facets, image_gen_source_status, )
 
 def _runtime_version() -> str:
     """Read the installed manifest at runtime; never trust a frontend hard-coded version alone."""
@@ -193,6 +193,11 @@ def api_generated_source_status():
 @router.post("/generated-images/import")
 def api_import_generated_images(payload: ImportImageGenPayload):
     try: return import_image_gen_gallery(project=payload.project, limit=payload.limit)
+    except Exception as exc: raise _http_error(exc) from exc
+
+@router.post("/generated-images/cleanup-missing")
+def api_cleanup_missing_generated():
+    try: return cleanup_missing_generated_images()
     except Exception as exc: raise _http_error(exc) from exc
 
 @router.get("/generated-images")
