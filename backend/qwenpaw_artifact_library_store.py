@@ -657,7 +657,11 @@ def _candidate_image_gen_dbs() -> list[Path]:
     here = Path(__file__).resolve()
     # Generic local candidates only. Do not include any personal workspace name,
     # username, absolute path, or private project name in community releases.
+    # 生图助手 v1.2.1 起把数据放在插件目录之外（%APPDATA%\QwenPaw\...），
+    # 因此新位置优先探测；旧位置继续保留以兼容尚未升级的安装。
+    app_data = Path(os.environ.get("APPDATA") or str(Path.home() / ".qwenpaw"))
     for base in [
+        app_data / "QwenPaw" / "qwenpaw-image-gen" / "image_gen.db",
         here.parents[2] / "qwenpaw-image-gen" / "data" / "image_gen.db",
         Path.home() / ".qwenpaw" / "plugins" / "qwenpaw-image-gen" / "data" / "image_gen.db",
         Path.home() / ".qwenpaw" / "data" / "qwenpaw-image-gen" / "image_gen.db",
